@@ -46,6 +46,6 @@ async def cmd_help(message: types.Message):
         "4. **⚔️ Janglar**: Boshqa xonadonlarga hujum qiling. Jangda yutsangiz, mag'lub xonadon sizning **vassalingizga** aylanadi va uning 20% oltini o'lja qilib olinadi!\n"
         "5. **✨ Soliqlar**: O'z vassallaringizdan har kuni soliqlar yig'ib oling.\n"
         "6. **🏞 Valeria Ekspiditsya**: Valeriya xarobalariga qidiruv ekspeditsiyasi yuborib oltin ishlang.\n"
-        "7. **🏦 Golden**: Bankdan har kuni bepul oltin bonusini oling."
+        "7. **⚔️ Sword Bank**: Askar, Kamonchi, Otliq yollang, qarz oling va kunlik bepul oltin bonusini oling."
     )
     await message.answer(help_text, parse_mode="Markdown")

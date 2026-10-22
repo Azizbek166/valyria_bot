@@ -99,10 +99,22 @@ TIER_A_HOUSES = [1, 11, 21, 31, 41]
 # Harbiy narxlar va ko'rsatkichlar
 UNITS = {
     "soldier": {
-        "name": "Oddiy askar",
+        "name": "Oddiy askar 🗡",
         "cost": 1,
         "atk": 1,
         "def": 1
+    },
+    "archer": {
+        "name": "Kamonchi 🏹",
+        "cost": 3,
+        "atk": 3,
+        "def": 3
+    },
+    "cavalry": {
+        "name": "Otliq 🐎",
+        "cost": 5,
+        "atk": 6,
+        "def": 6
     },
     "chakra": {
         "name": "Chakra",
@@ -203,6 +215,38 @@ ESSOS_MARKET = {
         "cost": 2,
         "power": 2,
         "desc": "O'tkir charxli Meereen quroli (2/2, kuniga 500 ta limit)"
+    }
+}
+
+# Sword Bank Qarz Paketlari (15% ustama foiz bilan)
+LOAN_PACKAGES = {
+    1: {
+        "id": 1,
+        "name": "Kichik qarz",
+        "amount": 200,
+        "due_amount": 230,
+        "desc": "200 🪙 qarz olinadi — 230 🪙 qaytariladi (+15% foiz)"
+    },
+    2: {
+        "id": 2,
+        "name": "O'rta qarz",
+        "amount": 500,
+        "due_amount": 575,
+        "desc": "500 🪙 qarz olinadi — 575 🪙 qaytariladi (+15% foiz)"
+    },
+    3: {
+        "id": 3,
+        "name": "Katta harbiy kredit",
+        "amount": 1000,
+        "due_amount": 1150,
+        "desc": "1,000 🪙 qarz olinadi — 1,150 🪙 qaytariladi (+15% foiz)"
+    },
+    4: {
+        "id": 4,
+        "name": "Oliy Lord qarzi",
+        "amount": 2500,
+        "due_amount": 2875,
+        "desc": "2,500 🪙 qarz olinadi — 2,875 🪙 qaytariladi (+15% foiz)"
     }
 }
 

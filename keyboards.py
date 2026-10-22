@@ -5,7 +5,8 @@ from aiogram.types import (
 from typing import List, Dict, Any, Optional
 from config import (
     ADMIN_IDS, REGIONS, ESSOS_MARKET,
-    DONATE_PACKAGES, CASTLE_COST, CASTLE_INCOME
+    DONATE_PACKAGES, CASTLE_COST, CASTLE_INCOME,
+    LOAN_PACKAGES
 )
 
 def main_menu_keyboard(user_id: int) -> ReplyKeyboardMarkup:
@@ -16,7 +17,7 @@ def main_menu_keyboard(user_id: int) -> ReplyKeyboardMarkup:
         [KeyboardButton(text="🌍 Esos Savdosi"), KeyboardButton(text="💳 Green Bank")],
         [KeyboardButton(text="⚔️ Janglar"), KeyboardButton(text="🐉 Hayvonlarim 🕷")],
         [KeyboardButton(text="✨ Soliqlar"), KeyboardButton(text="🥇 Reyting")],
-        [KeyboardButton(text="🏞 Valeria Ekspiditsya"), KeyboardButton(text="🏦 Golden")],
+        [KeyboardButton(text="🏞 Valeria Ekspiditsya"), KeyboardButton(text="⚔️ Sword Bank")],
         [KeyboardButton(text="🛘 Hududiy topshiriqlar")]
     ]
     if user_id in ADMIN_IDS:
@@ -194,9 +195,80 @@ def expedition_kb() -> InlineKeyboardMarkup:
     ])
 
 def bank_kb() -> InlineKeyboardMarkup:
+    return sword_bank_main_kb()
+
+def sword_bank_main_kb(has_debt: bool = False) -> InlineKeyboardMarkup:
+    loan_btn = InlineKeyboardButton(text="💸 Qarzni to'lash", callback_data="loan_repay_menu") if has_debt else InlineKeyboardButton(text="💳 Qarz olish (Kredit)", callback_data="loan_take_menu")
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎁 Kunlik oltin bonusni olish", callback_data="bank_claim_daily")],
-        [InlineKeyboardButton(text="📈 Xonadon moliyasi", callback_data="bank_info")]
+        [
+            InlineKeyboardButton(text="🗡 Oddiy Askar", callback_data="buy_unit_menu:soldier"),
+            InlineKeyboardButton(text="🏹 Kamonchi", callback_data="buy_unit_menu:archer"),
+            InlineKeyboardButton(text="🐎 Otliq", callback_data="buy_unit_menu:cavalry")
+        ],
+        [
+            loan_btn,
+            InlineKeyboardButton(text="🎁 Kunlik bonus", callback_data="bank_claim_daily")
+        ],
+        [
+            InlineKeyboardButton(text="📊 Moliyaviy hisobot", callback_data="bank_info")
+        ]
+    ])
+
+def troop_buy_kb(unit_type: str) -> InlineKeyboardMarkup:
+    if unit_type == "soldier":
+        rows = [
+            [
+                InlineKeyboardButton(text="10 ta (10 🪙)", callback_data="buy_unit_exec:soldier:10"),
+                InlineKeyboardButton(text="50 ta (50 🪙)", callback_data="buy_unit_exec:soldier:50")
+            ],
+            [
+                InlineKeyboardButton(text="100 ta (100 🪙)", callback_data="buy_unit_exec:soldier:100"),
+                InlineKeyboardButton(text="500 ta (500 🪙)", callback_data="buy_unit_exec:soldier:500")
+            ]
+        ]
+    elif unit_type == "archer":
+        rows = [
+            [
+                InlineKeyboardButton(text="10 ta (30 🪙)", callback_data="buy_unit_exec:archer:10"),
+                InlineKeyboardButton(text="25 ta (75 🪙)", callback_data="buy_unit_exec:archer:25")
+            ],
+            [
+                InlineKeyboardButton(text="50 ta (150 🪙)", callback_data="buy_unit_exec:archer:50"),
+                InlineKeyboardButton(text="100 ta (300 🪙)", callback_data="buy_unit_exec:archer:100")
+            ]
+        ]
+    else:  # cavalry
+        rows = [
+            [
+                InlineKeyboardButton(text="5 ta (25 🪙)", callback_data="buy_unit_exec:cavalry:5"),
+                InlineKeyboardButton(text="10 ta (50 🪙)", callback_data="buy_unit_exec:cavalry:10")
+            ],
+            [
+                InlineKeyboardButton(text="20 ta (100 🪙)", callback_data="buy_unit_exec:cavalry:20"),
+                InlineKeyboardButton(text="50 ta (250 🪙)", callback_data="buy_unit_exec:cavalry:50")
+            ]
+        ]
+    rows.append([InlineKeyboardButton(text="🔙 Sword Bankka qaytish", callback_data="sword_bank_back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+def loan_packages_kb() -> InlineKeyboardMarkup:
+    rows = []
+    for pkg_id, pkg in LOAN_PACKAGES.items():
+        btn_text = f"💳 {pkg['amount']} 🪙 qarz (Qaytarish: {pkg['due_amount']} 🪙)"
+        rows.append([InlineKeyboardButton(text=btn_text, callback_data=f"loan_take:{pkg_id}")])
+    rows.append([InlineKeyboardButton(text="🔙 Sword Bankka qaytish", callback_data="sword_bank_back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+def loan_repay_kb(due_amount: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"💸 To'liq to'lash ({due_amount} 🪙)", callback_data="loan_repay_full")],
+        [InlineKeyboardButton(text="💵 Mavjud bor oltin bilan to'lash", callback_data="loan_repay_all_gold")],
+        [InlineKeyboardButton(text="🔙 Sword Bankka qaytish", callback_data="sword_bank_back")]
+    ])
+
+def profile_custom_name_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✏️ Lord ismini o'zgartirish", callback_data="profile_change_name")]
     ])
 
 def taxes_kb() -> InlineKeyboardMarkup:
@@ -209,9 +281,22 @@ def admin_panel_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📢 Barchaga xabar tarqatish", callback_data="admin_broadcast")],
         [InlineKeyboardButton(text="💰 O'yinchiga oltin berish", callback_data="admin_give_gold")],
         [InlineKeyboardButton(text="❄️ Ajdarlarni muzdan chiqarish", callback_data="admin_unfreeze")],
-        [InlineKeyboardButton(text="🔄 Xonadonni bo'shatish", callback_data="admin_clear_house")],
+        [InlineKeyboardButton(text="🔄 Xonadonni ko'chirish", callback_data="admin_transfer_house")],
+        [InlineKeyboardButton(text="🏠 Xonadonni bo'shatish", callback_data="admin_clear_house")],
         [InlineKeyboardButton(text="📊 To'liq statistika", callback_data="admin_stats")],
         [InlineKeyboardButton(text="⚠️ O'yinni Restart qilish (Reset)", callback_data="admin_restart_prompt")]
+    ])
+
+def admin_unfreeze_options_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❄️ BARCHA ajdarlarni muzdan chiqarish", callback_data="admin_unfreeze_all")],
+        [InlineKeyboardButton(text="🎯 Bitta o'yinchi ajdarlarini chiqarish", callback_data="admin_unfreeze_single")],
+        [InlineKeyboardButton(text="🔙 Admin paneliga qaytish", callback_data="admin_back")]
+    ])
+
+def admin_cancel_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin_cancel")]
     ])
 
 def admin_restart_confirm_kb() -> InlineKeyboardMarkup:

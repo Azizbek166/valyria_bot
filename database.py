@@ -9,7 +9,7 @@ from config import (
     DB_PATH, HOUSES_DATA, START_GOLD, START_SOLDIERS,
     UNITS, DRAGON_GRADES, DRAGON_FREEZE_SECONDS, REGIONS,
     ESSOS_MARKET, CASTLE_INCOME, CASTLE_COST, TIER_A_HOUSES,
-    DONATE_PACKAGES, CHAKRA_DAILY_LIMIT
+    DONATE_PACKAGES, CHAKRA_DAILY_LIMIT, LOAN_PACKAGES
 )
 
 @asynccontextmanager
@@ -51,6 +51,14 @@ async def init_db():
             await db.execute("ALTER TABLE users ADD COLUMN daily_chakra_bought INTEGER DEFAULT 0")
         if "last_chakra_reset" not in u_columns:
             await db.execute("ALTER TABLE users ADD COLUMN last_chakra_reset INTEGER DEFAULT 0")
+        if "custom_name" not in u_columns:
+            await db.execute("ALTER TABLE users ADD COLUMN custom_name TEXT DEFAULT NULL")
+        if "debt_amount" not in u_columns:
+            await db.execute("ALTER TABLE users ADD COLUMN debt_amount INTEGER DEFAULT 0")
+        if "debt_due_amount" not in u_columns:
+            await db.execute("ALTER TABLE users ADD COLUMN debt_due_amount INTEGER DEFAULT 0")
+        if "debt_taken_at" not in u_columns:
+            await db.execute("ALTER TABLE users ADD COLUMN debt_taken_at INTEGER DEFAULT 0")
 
         # Houses jadvali (52 ta xonadon, 5 ta hudud)
         await db.execute("""
@@ -84,6 +92,8 @@ async def init_db():
             CREATE TABLE IF NOT EXISTS armies (
                 user_id INTEGER PRIMARY KEY,
                 soldiers INTEGER DEFAULT {START_SOLDIERS},
+                archers INTEGER DEFAULT 0,
+                cavalry INTEGER DEFAULT 0,
                 chakra INTEGER DEFAULT 0,
                 gold_cloaks INTEGER DEFAULT 0,
                 unsullied INTEGER DEFAULT 0,
@@ -97,6 +107,10 @@ async def init_db():
         # Armies jadvali migratsiyasi
         cursor = await db.execute("PRAGMA table_info(armies)")
         a_columns = [row["name"] for row in await cursor.fetchall()]
+        if "archers" not in a_columns:
+            await db.execute("ALTER TABLE armies ADD COLUMN archers INTEGER DEFAULT 0")
+        if "cavalry" not in a_columns:
+            await db.execute("ALTER TABLE armies ADD COLUMN cavalry INTEGER DEFAULT 0")
         if "unsullied" not in a_columns:
             await db.execute("ALTER TABLE armies ADD COLUMN unsullied INTEGER DEFAULT 0")
         if "faceless" not in a_columns:
@@ -251,7 +265,7 @@ async def get_or_create_user(telegram_id: int, username: str, full_name: str) ->
                 (telegram_id, username or "", full_name or "", START_GOLD, now)
             )
             await db.execute(
-                "INSERT INTO armies (user_id, soldiers, chakra, gold_cloaks, unsullied, faceless, shadow, poison) VALUES (?, ?, 0, 0, 0, 0, 0, 0)",
+                "INSERT INTO armies (user_id, soldiers, archers, cavalry, chakra, gold_cloaks, unsullied, faceless, shadow, poison) VALUES (?, ?, 0, 0, 0, 0, 0, 0, 0, 0)",
                 (telegram_id, START_SOLDIERS)
             )
             await db.commit()
@@ -297,7 +311,7 @@ async def update_user_gold(telegram_id: int, delta: int) -> int:
 async def get_user_house(telegram_id: int) -> Optional[Dict[str, Any]]:
     async with get_db_connection() as db:
         cursor = await db.execute("""
-            SELECT h.*, u.username as owner_username, u.full_name as owner_name,
+            SELECT h.*, u.username as owner_username, COALESCE(u.custom_name, u.full_name) as owner_name,
                    c.level as castle_level
             FROM houses h
             LEFT JOIN users u ON h.owner_id = u.telegram_id
@@ -310,7 +324,7 @@ async def get_user_house(telegram_id: int) -> Optional[Dict[str, Any]]:
 async def get_house_by_id(house_id: int) -> Optional[Dict[str, Any]]:
     async with get_db_connection() as db:
         cursor = await db.execute("""
-            SELECT h.*, u.username as owner_username, u.full_name as owner_name,
+            SELECT h.*, u.username as owner_username, COALESCE(u.custom_name, u.full_name) as owner_name,
                    c.level as castle_level
             FROM houses h
             LEFT JOIN users u ON h.owner_id = u.telegram_id
@@ -323,7 +337,7 @@ async def get_house_by_id(house_id: int) -> Optional[Dict[str, Any]]:
 async def get_houses(house_type: Optional[str] = None, region: Optional[str] = None) -> List[Dict[str, Any]]:
     async with get_db_connection() as db:
         base_query = """
-            SELECT h.*, u.username as owner_username, u.full_name as owner_name,
+            SELECT h.*, u.username as owner_username, COALESCE(u.custom_name, u.full_name) as owner_name,
                    c.level as castle_level
             FROM houses h
             LEFT JOIN users u ON h.owner_id = u.telegram_id
@@ -671,6 +685,8 @@ async def calculate_player_power(telegram_id: int) -> Dict[str, Any]:
 
     troops_power = (
         army.get("soldiers", 0) * UNITS["soldier"]["atk"] +
+        army.get("archers", 0) * UNITS.get("archer", {}).get("atk", 3) +
+        army.get("cavalry", 0) * UNITS.get("cavalry", {}).get("atk", 6) +
         chakra_power +
         army.get("gold_cloaks", 0) * UNITS["gold_cloak"]["atk"] +
         army.get("unsullied", 0) * UNITS["unsullied"]["atk"] +
@@ -1001,7 +1017,7 @@ async def claim_daily_bonus(user_id: int) -> tuple[bool, str]:
 async def get_top_players(limit: int = 10) -> List[Dict[str, Any]]:
     async with get_db_connection() as db:
         cursor = await db.execute("""
-            SELECT u.telegram_id, u.full_name, u.username, u.gold, 
+            SELECT u.telegram_id, COALESCE(u.custom_name, u.full_name) as full_name, u.username, u.gold, 
                    h.name as house_name, h.type as house_type, h.region, h.tier
             FROM users u
             LEFT JOIN houses h ON h.owner_id = u.telegram_id
@@ -1642,3 +1658,131 @@ async def get_all_users() -> List[Dict[str, Any]]:
         cursor = await db.execute("SELECT * FROM users")
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
+
+async def set_user_custom_name(telegram_id: int, custom_name: str) -> tuple[bool, str]:
+    cleaned = custom_name.strip()
+    if len(cleaned) < 2 or len(cleaned) > 32:
+        return False, "Ism uzunligi 2 dan 32 ta belgiga teng bo'lishi kerak!"
+    async with get_db_connection() as db:
+        await db.execute("UPDATE users SET custom_name = ? WHERE telegram_id = ?", (cleaned, telegram_id))
+        await db.commit()
+    return True, f"Ismingiz muvaffaqiyatli o'zgartirildi: **{cleaned}**"
+
+async def buy_sword_bank_troops(telegram_id: int, unit_type: str, count: int) -> tuple[bool, str]:
+    if count <= 0:
+        return False, "Miqdor kamida 1 ta bo'lishi kerak!"
+
+    unit_map = {
+        "soldier": {"col": "soldiers", "cost": 1, "name": "Oddiy askar 🗡"},
+        "archer": {"col": "archers", "cost": 3, "name": "Kamonchi 🏹"},
+        "cavalry": {"col": "cavalry", "cost": 5, "name": "Otliq 🐎"}
+    }
+
+    info = unit_map.get(unit_type)
+    if not info:
+        return False, "Noto'g'ri harbiy qism tanlandi!"
+
+    total_cost = info["cost"] * count
+    user = await get_user(telegram_id)
+    if not user or user["gold"] < total_cost:
+        return False, f"Xazinangizda yetarli oltin yo'q! Kerak: {total_cost} 🪙, sizda: {user['gold'] if user else 0} 🪙."
+
+    col = info["col"]
+    async with get_db_connection() as db:
+        await db.execute("UPDATE users SET gold = gold - ? WHERE telegram_id = ?", (total_cost, telegram_id))
+        await db.execute(f"UPDATE armies SET {col} = {col} + ? WHERE user_id = ?", (count, telegram_id))
+        await db.commit()
+
+    return True, f"Tabriklaymiz! Siz {count} ta **{info['name']}** yolladingiz! (-{total_cost} 🪙)"
+
+async def take_bank_loan(telegram_id: int, package_id: int) -> tuple[bool, str]:
+    pkg = LOAN_PACKAGES.get(package_id)
+    if not pkg:
+        return False, "Noto'g'ri qarz paketi tanlandi!"
+
+    user = await get_user(telegram_id)
+    if not user:
+        return False, "Foydalanuvchi topilmadi!"
+
+    if (user.get("debt_due_amount") or 0) > 0:
+        return False, f"⚠️ Sizda to'lanmagan faol qarzingiz mavjud: **{user['debt_due_amount']} 🪙**!\nYangi qarz olishdan oldin mavjud qarzni to'lang."
+
+    now = int(time.time())
+    loan_amount = pkg["amount"]
+    due_amount = pkg["due_amount"]
+
+    async with get_db_connection() as db:
+        await db.execute("""
+            UPDATE users SET
+                gold = gold + ?,
+                debt_amount = ?,
+                debt_due_amount = ?,
+                debt_taken_at = ?
+            WHERE telegram_id = ?
+        """, (loan_amount, loan_amount, due_amount, now, telegram_id))
+        await db.commit()
+
+    return True, f"✅ Siz Sword Bankdan **+{loan_amount} 🪙** qarz oldingiz!\nQaytarilishi kerak bo'lgan miqdor: **{due_amount} 🪙** (+15% foiz bilan)."
+
+async def repay_bank_loan(telegram_id: int, amount: Optional[int] = None) -> tuple[bool, str]:
+    user = await get_user(telegram_id)
+    if not user:
+        return False, "Foydalanuvchi topilmadi!"
+
+    due = user.get("debt_due_amount", 0) or 0
+    if due <= 0:
+        return False, "Sizda to'lanishi kerak bo'lgan faol qarz yo'q!"
+
+    user_gold = user.get("gold", 0) or 0
+    if user_gold <= 0:
+        return False, "Xazinangizda qarz to'lash uchun yetarli oltin yo'q!"
+
+    if amount is None or amount >= due:
+        pay_amount = min(due, user_gold)
+    else:
+        pay_amount = min(amount, user_gold)
+
+    if pay_amount <= 0:
+        return False, "To'lov miqdori kamida 1 🪙 bo'lishi kerak!"
+
+    new_due = due - pay_amount
+    new_debt_amount = user.get("debt_amount", 0) if new_due > 0 else 0
+
+    async with get_db_connection() as db:
+        await db.execute("""
+            UPDATE users SET
+                gold = gold - ?,
+                debt_amount = ?,
+                debt_due_amount = ?
+            WHERE telegram_id = ?
+        """, (pay_amount, new_debt_amount, new_due, telegram_id))
+        await db.commit()
+
+    if new_due == 0:
+        return True, f"🎉 **Tabriklaymiz! Qarzingiz to'liq yopildi (-{pay_amount} 🪙)!**\nSword Bank sizga minnatdorchilik bildiradi."
+    else:
+        return True, f"✅ Qarzning bir qismi to'landi: **-{pay_amount} 🪙**.\nQolgan qarz miqdori: **{new_due} 🪙**."
+
+async def admin_unfreeze_all_dragons() -> int:
+    async with get_db_connection() as db:
+        now = int(time.time())
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM beasts WHERE beast_type = 'dragon' AND frozen_until > ?",
+            (now,)
+        )
+        count = (await cursor.fetchone())[0]
+        await db.execute("UPDATE beasts SET frozen_until = 0 WHERE beast_type = 'dragon'")
+        await db.commit()
+        return count
+
+async def admin_give_gold_add(telegram_id: int, amount: int) -> tuple[bool, str, int]:
+    async with get_db_connection() as db:
+        cursor = await db.execute("SELECT gold FROM users WHERE telegram_id = ?", (telegram_id,))
+        row = await cursor.fetchone()
+        if not row:
+            return False, f"ID `{telegram_id}` bo'lgan o'yinchi topilmadi!", 0
+        current_gold = row["gold"]
+        new_gold = max(0, current_gold + amount)
+        await db.execute("UPDATE users SET gold = ? WHERE telegram_id = ?", (new_gold, telegram_id))
+        await db.commit()
+        return True, f"O'yinchiga {amount} 🪙 oltin berildi! Yangi balans: {new_gold} 🪙", new_gold
