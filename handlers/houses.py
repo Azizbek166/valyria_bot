@@ -95,6 +95,7 @@ async def callback_house_detail(callback: types.CallbackQuery):
             await callback.answer("Xonadon topilmadi!", show_alert=True)
             return
 
+        house_name = escape_md(house.get("name", "Noma'lum"))
         is_available = house["owner_id"] is None
         is_owner = house["owner_id"] == callback.from_user.id
         reg_info = REGIONS.get(house.get("region", ""), {})
@@ -112,21 +113,22 @@ async def callback_house_detail(callback: types.CallbackQuery):
 
         if house["owner_id"]:
             owner_user = await get_user(house["owner_id"])
-            lord_custom = owner_user.get("custom_name") or owner_user.get("full_name") if owner_user else f"Lord #{house['owner_id']}"
-            lord_name_esc = escape_md(lord_custom)
+            raw_name = owner_user.get("custom_name") or owner_user.get("full_name") if owner_user else f"Lord #{house['owner_id']}"
+            clean_name = str(raw_name).replace("[", "").replace("]", "").replace("`", "").replace("*", "")
             u_raw = owner_user.get("username") if owner_user else None
             user_tag = f"@{escape_md(u_raw)}" if u_raw else f"[Profil](tg://user?id={house['owner_id']})"
 
             # Lord stats
             power_info = await calculate_player_power(house["owner_id"])
-            owner_army = await get_user_army(house["owner_id"])
-            owner_beasts = await get_user_beasts(house["owner_id"])
-            active_dragons = [b for b in owner_beasts if b["beast_type"] == "dragon"]
+            owner_army = await get_user_army(house["owner_id"]) or {}
+            owner_beasts = await get_user_beasts(house["owner_id"]) or []
+            active_dragons = [b for b in owner_beasts if b.get("beast_type") == "dragon"]
 
             overlord_info = ""
-            if house["overlord_id"]:
+            if house.get("overlord_id"):
                 overlord_user = await get_user(house["overlord_id"])
-                ov_name = escape_md(overlord_user.get("custom_name") or overlord_user.get("full_name") if overlord_user else f"#{house['overlord_id']}")
+                ov_raw = overlord_user.get("custom_name") or overlord_user.get("full_name") if overlord_user else f"#{house['overlord_id']}"
+                ov_name = escape_md(ov_raw)
                 ov_u = overlord_user.get("username") if overlord_user else None
                 ov_u_str = f" (@{escape_md(ov_u)})" if ov_u else ""
                 overlord_info = f"\n⛓ **Qaramlik (Vassal):** Lord **{ov_name}**{ov_u_str} xonadoniga qaram"
@@ -136,9 +138,9 @@ async def callback_house_detail(callback: types.CallbackQuery):
             detail_text = (
                 f"🏛 **XONADON: {house_name}** (#{house['id']})\n"
                 f"━━━━━━━━━━━━━━━━━━━━\n"
-                f"👑 **Hukmdor (Lord):** [{lord_name_esc}](tg://user?id={house['owner_id']})\n"
+                f"👑 **Hukmdor (Lord):** [{clean_name}](tg://user?id={house['owner_id']})\n"
                 f"👤 **Lord Useri:** {user_tag} (ID: `{house['owner_id']}`)\n"
-                f"⚡️ **Harbiy qudrati:** **{power_info['total_active_power']} ball**\n"
+                f"⚡️ **Harbiy qudrati:** **{power_info.get('total_active_power', 0)} ball**\n"
                 f"🗡 **Armiya:** {owner_army.get('soldiers', 0)} askar, {owner_army.get('archers', 0)} kamonchi, {owner_army.get('cavalry', 0)} otliq\n"
                 f"🐲 **Ajdarlar:** {len(active_dragons)} ta\n"
                 f"🏰 **Qal'a:** {castle_txt}\n"
@@ -160,11 +162,18 @@ async def callback_house_detail(callback: types.CallbackQuery):
                 f"━━━━━━━━━━━━━━━━━━━━"
             )
 
-        await callback.message.edit_text(
-            detail_text,
-            reply_markup=house_action_kb(house_id, is_available, is_owner),
-            parse_mode="Markdown"
-        )
+        try:
+            await callback.message.edit_text(
+                detail_text,
+                reply_markup=house_action_kb(house_id, is_available, is_owner),
+                parse_mode="Markdown"
+            )
+        except Exception:
+            safe_text = detail_text.replace("*", "").replace("`", "").replace("_", "")
+            await callback.message.edit_text(
+                safe_text,
+                reply_markup=house_action_kb(house_id, is_available, is_owner)
+            )
         await callback.answer()
     except Exception as e:
         logger.error(f"Xonadon tafsilotlarida xatolik: {e}", exc_info=True)
