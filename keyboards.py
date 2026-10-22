@@ -2,7 +2,7 @@ from aiogram.types import (
     ReplyKeyboardMarkup, KeyboardButton,
     InlineKeyboardMarkup, InlineKeyboardButton
 )
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from config import (
     ADMIN_IDS, REGIONS, ESSOS_MARKET,
     DONATE_PACKAGES, CASTLE_COST, CASTLE_INCOME
