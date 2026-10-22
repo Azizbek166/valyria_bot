@@ -107,6 +107,88 @@ def battle_confirm_kb(target_house_id: int, can_call_bannermen: bool = False, ca
     rows.append([InlineKeyboardButton(text="🔙 Chekinish", callback_data="house_cats_back")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
+def battle_army_select_kb(
+    target_house_id: int,
+    army: dict,
+    selected: dict,
+    has_dragons: bool = False,
+    include_dragons: bool = True,
+    has_specials: bool = False,
+    include_specials: bool = True,
+    can_call_bannermen: bool = False,
+    call_id: int = 0
+) -> InlineKeyboardMarkup:
+    rows = []
+
+    if can_call_bannermen:
+        rows.append([InlineKeyboardButton(text="🎺 Bayroqdorlarni yordamga chorlash!", callback_data=f"trigger_cta:{target_house_id}")])
+
+    sold_avail = army.get("soldiers", 0)
+    sold_sel = selected.get("soldiers", 0)
+    rows.append([InlineKeyboardButton(text=f"🗡 Oddiy Askar: {sold_sel}/{sold_avail}", callback_data="noop")])
+    rows.append([
+        InlineKeyboardButton(text="+10", callback_data="bt_adj:soldiers:+10"),
+        InlineKeyboardButton(text="+50", callback_data="bt_adj:soldiers:+50"),
+        InlineKeyboardButton(text="Hammasi", callback_data="bt_adj:soldiers:all"),
+        InlineKeyboardButton(text="0", callback_data="bt_adj:soldiers:zero")
+    ])
+
+    arch_avail = army.get("archers", 0)
+    arch_sel = selected.get("archers", 0)
+    if arch_avail > 0:
+        rows.append([InlineKeyboardButton(text=f"🏹 Kamonchi: {arch_sel}/{arch_avail}", callback_data="noop")])
+        rows.append([
+            InlineKeyboardButton(text="+5", callback_data="bt_adj:archers:+5"),
+            InlineKeyboardButton(text="+20", callback_data="bt_adj:archers:+20"),
+            InlineKeyboardButton(text="Hammasi", callback_data="bt_adj:archers:all"),
+            InlineKeyboardButton(text="0", callback_data="bt_adj:archers:zero")
+        ])
+
+    cav_avail = army.get("cavalry", 0)
+    cav_sel = selected.get("cavalry", 0)
+    if cav_avail > 0:
+        rows.append([InlineKeyboardButton(text=f"🐎 Otliq: {cav_sel}/{cav_avail}", callback_data="noop")])
+        rows.append([
+            InlineKeyboardButton(text="+2", callback_data="bt_adj:cavalry:+2"),
+            InlineKeyboardButton(text="+10", callback_data="bt_adj:cavalry:+10"),
+            InlineKeyboardButton(text="Hammasi", callback_data="bt_adj:cavalry:all"),
+            InlineKeyboardButton(text="0", callback_data="bt_adj:cavalry:zero")
+        ])
+
+    if has_dragons:
+        d_status = "✅ Ajdarlar qo'shilgan" if include_dragons else "❌ Ajdarlar olib tashlangan"
+        rows.append([InlineKeyboardButton(text=f"🐲 {d_status}", callback_data="bt_toggle:dragons")])
+
+    if has_specials:
+        s_status = "✅ Maxsus qo'shinlar qo'shilgan" if include_specials else "❌ Maxsus qo'shinlar olib tashlangan"
+        rows.append([InlineKeyboardButton(text=f"⚡️ {s_status}", callback_data="bt_toggle:specials")])
+
+    rows.append([
+        InlineKeyboardButton(text="🌟 Barcha kuch bilan (100%)", callback_data="bt_preset:all"),
+        InlineKeyboardButton(text="🔄 Tozalash (0)", callback_data="bt_preset:zero")
+    ])
+    rows.append([
+        InlineKeyboardButton(text="📝 Miqdorni qo'lda kiritish", callback_data="bt_custom_input")
+    ])
+
+    rows.append([
+        InlineKeyboardButton(text="🚀 Jangga otlanish! (8 daqiqa)", callback_data=f"bt_confirm_march:{target_house_id}:{call_id}")
+    ])
+    rows.append([
+        InlineKeyboardButton(text="🔙 Chekinish (Bekor qilish)", callback_data="bt_cancel")
+    ])
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+def active_battle_status_kb(battle_id: int, is_ready: bool = False) -> InlineKeyboardMarkup:
+    rows = []
+    if is_ready:
+        rows.append([InlineKeyboardButton(text="⚔️ Jang natijasini olish! 🎉", callback_data=f"battle_resolve:{battle_id}")])
+    else:
+        rows.append([InlineKeyboardButton(text="⏱ Vaqtni tekshirish", callback_data=f"battle_refresh:{battle_id}")])
+    rows.append([InlineKeyboardButton(text="🔙 Asosiy Menyu", callback_data="bt_back_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
 def essos_market_kb() -> InlineKeyboardMarkup:
     rows = []
     for key, item in ESSOS_MARKET.items():

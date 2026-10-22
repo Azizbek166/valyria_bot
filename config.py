@@ -261,6 +261,9 @@ DRAGON_GRADES = {
 # Ajdar muzlash vaqti (3 kun = 72 soat = 259,200 soniya)
 DRAGON_FREEZE_SECONDS = 3 * 24 * 3600
 
+# Jang davomiyligi (8 daqiqa = 480 soniya)
+BATTLE_DURATION_SECONDS = 8 * 60
+
 # 5 ta Asosiy Hududlar
 REGIONS = {
     "crownlands": {
