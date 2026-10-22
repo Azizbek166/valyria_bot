@@ -1,7 +1,7 @@
 from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from config import DONATE_CARD, DONATE_CARD_HOLDER, DONATE_PACKAGES, ADMIN_IDS
+from config import DONATE_CARD, DONATE_CARD_HOLDER, DONATE_PACKAGES, ADMIN_IDS, escape_md
 from database import get_user, create_donation_request
 from keyboards import (
     green_bank_packages_kb, green_bank_package_detail_kb,
@@ -107,8 +107,8 @@ async def handle_receipt_photo(message: types.Message, state: FSMContext):
 
     photo_id = message.photo[-1].file_id
     user_id = message.from_user.id
-    user_fullname = message.from_user.full_name
-    username = f"@{message.from_user.username}" if message.from_user.username else "username yo'q"
+    user_fullname = escape_md(message.from_user.full_name)
+    username = f"@{escape_md(message.from_user.username)}" if message.from_user.username else "username yo'q"
 
     # Save to database
     donation_id = await create_donation_request(user_id, pkg_id, photo_id, "photo")
@@ -156,8 +156,8 @@ async def handle_receipt_document(message: types.Message, state: FSMContext):
 
     doc_id = message.document.file_id
     user_id = message.from_user.id
-    user_fullname = message.from_user.full_name
-    username = f"@{message.from_user.username}" if message.from_user.username else "username yo'q"
+    user_fullname = escape_md(message.from_user.full_name)
+    username = f"@{escape_md(message.from_user.username)}" if message.from_user.username else "username yo'q"
 
     donation_id = await create_donation_request(user_id, pkg_id, doc_id, "document")
     await state.clear()

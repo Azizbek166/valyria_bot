@@ -1,4 +1,5 @@
 import os
+from typing import Any, Dict, List, Optional
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -329,3 +330,13 @@ HOUSES_DATA = [
     {"id": 51, "name": "Belvaeron", "type": "sea", "region": "sea_guardians", "is_regional_lord": False, "tier": "B"},
     {"id": 52, "name": "Aenqarys", "type": "sea", "region": "sea_guardians", "is_regional_lord": False, "tier": "B"}
 ]
+
+def escape_md(text: Any) -> str:
+    """Telegram Markdown (v1) maxsus belgilarini (_ * ` [) xavfsiz qilish"""
+    if not text:
+        return ""
+    res = str(text)
+    for ch in ("_", "*", "`", "["):
+        res = res.replace(ch, "\\" + ch)
+    return res
+

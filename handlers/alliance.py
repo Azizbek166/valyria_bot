@@ -6,6 +6,7 @@ from database import (
     get_houses, get_house_by_id, get_user
 )
 from keyboards import alliance_main_kb, alliance_decision_kb, alliance_type_select_kb
+from config import escape_md
 
 router = Router()
 
@@ -13,9 +14,10 @@ def build_alliance_menu_text(user_house: dict, alliances: dict, proposals: list)
     m = alliances.get("marriage")
     if m:
         is_h1 = m["house1_id"] == user_house["id"]
-        m_house = m["h2_name"] if is_h1 else m["h1_name"]
-        m_lord = m["u2_name"] if is_h1 else m["u1_name"]
-        m_user = f" (@{m['u2_username']})" if (is_h1 and m.get("u2_username")) else (f" (@{m['u1_username']})" if (not is_h1 and m.get("u1_username")) else "")
+        m_house = escape_md(m["h2_name"] if is_h1 else m["h1_name"])
+        m_lord = escape_md(m["u2_name"] if is_h1 else m["u1_name"])
+        raw_u = m.get("u2_username") if is_h1 else m.get("u1_username")
+        m_user = f" (@{escape_md(raw_u)})" if raw_u else ""
         marriage_info = (
             f"• Holat: ✅ **Tuzilgan**\n"
             f"• Hamkor: **{m_house}** (Lord: **{m_lord}**{m_user})\n"
@@ -30,9 +32,10 @@ def build_alliance_menu_text(user_house: dict, alliances: dict, proposals: list)
     s = alliances.get("strategic")
     if s:
         is_h1 = s["house1_id"] == user_house["id"]
-        s_house = s["h2_name"] if is_h1 else s["h1_name"]
-        s_lord = s["u2_name"] if is_h1 else s["u1_name"]
-        s_user = f" (@{s['u2_username']})" if (is_h1 and s.get("u2_username")) else (f" (@{s['u1_username']})" if (not is_h1 and s.get("u1_username")) else "")
+        s_house = escape_md(s["h2_name"] if is_h1 else s["h1_name"])
+        s_lord = escape_md(s["u2_name"] if is_h1 else s["u1_name"])
+        raw_su = s.get("u2_username") if is_h1 else s.get("u1_username")
+        s_user = f" (@{escape_md(raw_su)})" if raw_su else ""
         strategic_info = (
             f"• Holat: ✅ **Tuzilgan**\n"
             f"• Hamkor: **{s_house}** (Lord: **{s_lord}**{s_user})\n"
@@ -156,8 +159,10 @@ async def callback_propose_alliance(callback: types.CallbackQuery):
         await callback.answer(f"{type_title} taklifi yuborildi!", show_alert=True)
         sender_house = await get_user_house(callback.from_user.id)
         sender_user = await get_user(callback.from_user.id)
-        sender_name = sender_user["full_name"] if sender_user else "Lord"
-        username_str = f" (@{sender_user['username']})" if sender_user and sender_user.get("username") else ""
+        sender_name = escape_md(sender_user["full_name"] if sender_user else "Lord")
+        u_raw = sender_user.get("username") if sender_user else None
+        username_str = f" (@{escape_md(u_raw)})" if u_raw else ""
+        s_house_name = escape_md(sender_house.get('name', 'Xonadon') if sender_house else "Xonadon")
 
         # Target lordga xabar yuborish
         if target_lord_id:
@@ -171,7 +176,7 @@ async def callback_propose_alliance(callback: types.CallbackQuery):
                     f"💍 **SIZNING XONADONINGIZGA {type_title.upper()} TAKLIFI KELDI!**\n"
                     "━━━━━━━━━━━━━━━━━━━━\n"
                     f"👑 Yuboruvchi: **{sender_name}**{username_str}\n"
-                    f"🏰 Xonadon: **{sender_house['name']}**\n\n"
+                    f"🏰 Xonadon: **{s_house_name}**\n\n"
                     f"🌟 **Taklif etilayotgan rishta:** {type_title}\n"
                     f"{perks}\n\n"
                     "Qabul qilasizmi yoki rad etasizmi?"
@@ -205,7 +210,10 @@ async def callback_alliance_pending_list(callback: types.CallbackQuery):
         return
 
     prop = proposals[0]
-    username_str = f" (@{prop['sender_username']})" if prop.get('sender_username') else ""
+    raw_pu = prop.get('sender_username')
+    username_str = f" (@{escape_md(raw_pu)})" if raw_pu else ""
+    prop_house_name = escape_md(prop.get('sender_house_name', ''))
+    prop_sender_name = escape_md(prop.get('sender_name', ''))
     all_type = prop.get("alliance_type", "marriage")
     type_title = "Sulolaviy Nikoh 💍" if all_type == "marriage" else "Manfaatli Ittifoq 🤝"
     perks = (
@@ -218,8 +226,8 @@ async def callback_alliance_pending_list(callback: types.CallbackQuery):
         f"📬 **SIZGA KELGAN TAKLIF:**\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         f"🌟 Rishta turi: **{type_title}**\n"
-        f"🏰 Xonadon: **{prop['sender_house_name']}**\n"
-        f"👑 Hukmdor: **{prop['sender_name']}**{username_str}\n\n"
+        f"🏰 Xonadon: **{prop_house_name}**\n"
+        f"👑 Hukmdor: **{prop_sender_name}**{username_str}\n\n"
         f"Imtiyozlar:\n{perks}\n\n"
         "Ushbu taklifni tasdiqlaysizmi?"
     )

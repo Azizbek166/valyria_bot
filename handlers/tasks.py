@@ -7,44 +7,55 @@ from database import (
     claim_daily_super_bonus
 )
 from keyboards import daily_tasks_kb
-from config import REGIONS
+from config import REGIONS, escape_md
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
 @router.message(F.text == "🥇 Reyting")
 async def show_leaderboard(message: types.Message):
-    top_players = await get_top_players(limit=10)
+    try:
+        top_players = await get_top_players(limit=10)
 
-    if not top_players:
-        await message.answer("🥇 Reyting jadvali hozircha bo'sh.", parse_mode="Markdown")
-        return
+        if not top_players:
+            await message.answer("🥇 Reyting jadvali hozircha bo'sh.", parse_mode="Markdown")
+            return
 
-    medals = ["🥇", "🥈", "🥉", "4.", "5.", "6.", "7.", "8.", "9.", "10."]
-    lines = []
-    for i, p in enumerate(top_players):
-        medal = medals[i] if i < len(medals) else f"{i+1}."
-        h_type_icon = "🏰" if p.get("house_type") == "land" else "🌊"
-        username_str = f" (@{p['username']})" if p.get("username") else ""
-        tier_tag = f"[{p.get('tier', 'B')}-toifa]"
-        lines.append(
-            f"{medal} **{p['house_name']}** {tier_tag} — {p['full_name']}{username_str} — **{p['gold']} 🪙** {h_type_icon}"
+        medals = ["🥇", "🥈", "🥉", "4.", "5.", "6.", "7.", "8.", "9.", "10."]
+        lines = []
+        for i, p in enumerate(top_players):
+            medal = medals[i] if i < len(medals) else f"{i+1}."
+            h_type_icon = "🏰" if p.get("house_type") == "land" else "🌊"
+            u_raw = p.get("username")
+            username_str = f" (@{escape_md(u_raw)})" if u_raw else ""
+            f_name = escape_md(p.get("full_name") or "Lord")
+            h_name = escape_md(p.get("house_name") or "Xonadon")
+            tier_tag = f"[{p.get('tier', 'B')}-toifa]"
+            lines.append(
+                f"{medal} **{h_name}** {tier_tag} — {f_name}{username_str} — **{p['gold']} 🪙** {h_type_icon}"
+            )
+
+        text = (
+            "🥇 **VALERIYA ENG QUDRATLI VA BOY LORDLARI REYTINGI**\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            + "\n".join(lines) +
+            "\n━━━━━━━━━━━━━━━━━━━━\n"
+            "Reytingda yuqorilash uchun jang qiling va xazinangizni boyiting!"
         )
 
-    text = (
-        "🥇 **VALERIYA ENG QUDRATLI VA BOY LORDLARI REYTINGI**\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        + "\n".join(lines) +
-        "\n━━━━━━━━━━━━━━━━━━━━\n"
-        "Reytingda yuqorilash uchun jang qiling va xazinangizni boyiting!"
-    )
-
-    await message.answer(text, parse_mode="Markdown")
+        await message.answer(text, parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Reyting ko'rsatishda xatolik: {e}")
+        await message.answer("🥇 Reyting ma'lumotlarini yuklashda xatolik yuz berdi.")
 
 def build_daily_tasks_text(user_house: Optional[Dict[str, Any]], daily: Dict[str, Any]) -> str:
     if user_house:
         reg_info = REGIONS.get(user_house.get("region", ""), {})
-        reg_name = reg_info.get("name", "Valeriya")
-        house_name = f"{user_house['name']} [{user_house.get('tier', 'B')}-toifa]"
+        reg_name = escape_md(reg_info.get("name", "Valeriya"))
+        h_name = escape_md(user_house.get('name', ''))
+        house_name = f"{h_name} [{user_house.get('tier', 'B')}-toifa]"
     else:
         reg_name = "Valeriya sarhadlari"
         house_name = "Tanlanmagan"
@@ -93,13 +104,17 @@ def build_daily_tasks_text(user_house: Optional[Dict[str, Any]], daily: Dict[str
 
 @router.message(F.text == "🛘 Hududiy topshiriqlar")
 async def show_territory_tasks(message: types.Message):
-    user_id = message.from_user.id
-    user_house = await get_user_house(user_id)
-    daily = await get_user_daily_tasks(user_id)
+    try:
+        user_id = message.from_user.id
+        user_house = await get_user_house(user_id)
+        daily = await get_user_daily_tasks(user_id)
 
-    text = build_daily_tasks_text(user_house, daily)
-    kb = daily_tasks_kb(daily)
-    await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+        text = build_daily_tasks_text(user_house, daily)
+        kb = daily_tasks_kb(daily)
+        await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Hududiy topshiriqlarda xatolik: {e}", exc_info=True)
+        await message.answer("🛘 Hududiy topshiriqlarni yuklashda xatolik yuz berdi.")
 
 @router.callback_query(F.data == "daily_task_1")
 async def callback_daily_task_1(callback: types.CallbackQuery):

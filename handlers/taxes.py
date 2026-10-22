@@ -5,73 +5,82 @@ from database import (
     get_user
 )
 from keyboards import taxes_kb
+from config import escape_md
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
 @router.message(F.text == "✨ Soliqlar")
 async def show_taxes_menu(message: types.Message):
-    user_id = message.from_user.id
-    user = await get_user(user_id)
-    user_house = await get_user_house(user_id)
+    try:
+        user_id = message.from_user.id
+        user = await get_user(user_id)
+        user_house = await get_user_house(user_id)
 
-    if not user_house:
-        await message.answer(
-            "⚠️ Soliq tizimidan foydalanish uchun avval **🌋 Oila tanlash** orqali xonadoningizni tanlang.",
-            parse_mode="Markdown"
+        if not user_house:
+            await message.answer(
+                "⚠️ Soliq tizimidan foydalanish uchun avval **🌋 Oila tanlash** orqali xonadoningizni tanlang.",
+                parse_mode="Markdown"
+            )
+            return
+
+        vassals = await get_vassals(user_id)
+
+        # O'zining vassallik holati
+        overlord_text = ""
+        if user_house["overlord_id"]:
+            overlord_house = await get_user_house(user_house["overlord_id"])
+            overlord_name = escape_md(overlord_house["name"] if overlord_house else "Noma'lum")
+            overlord_text = f"⚠️ *Eslatma: Sizning xonadoningiz **{overlord_name}** xonadoniga qaram (vassal).* Har 24 soatda ular sizdan soliq yig'ib olishlari mumkin.\n\n"
+
+        # Soliq taymeri tekshiruvi (24 soat)
+        now = int(time.time())
+        last_tax = user.get("last_tax_collected", 0) or 0
+        cooldown = 24 * 3600
+        if now - last_tax < cooldown:
+            left_sec = cooldown - (now - last_tax)
+            left_h = left_sec // 3600
+            left_m = (left_sec % 3600) // 60
+            timer_status = f"⏳ **Keyingi soliq olish vaqti:** {left_h} soat {left_m} daqiqadan so'ng"
+        else:
+            timer_status = "🟢 **Soliq tayyor!** Hoziroq yig'ib olishingiz mumkin."
+
+        vassals_lines = []
+        for v in vassals:
+            v_owner = await get_user(v["owner_id"])
+            owner_name = escape_md(v_owner["full_name"] if v_owner else f"Lord #{v['owner_id']}")
+            v_name = escape_md(v['name'])
+            vassals_lines.append(f"• ⛓ **{v_name}** (#{v['id']}) — Hukmdor: {owner_name}")
+
+        if vassals:
+            vassals_info = "\n".join(vassals_lines)
+            vassal_desc = (
+                f"👑 **Sizning bo'ysundirilgan vassallaringiz ({len(vassals)} ta):**\n"
+                f"{vassals_info}\n\n"
+                f"📌 *Qoida: Har bir vassaldan har 24 soatda bir marta 20 🪙 soliq yig'ib olinadi.*\n"
+                f"{timer_status}"
+            )
+            kb = taxes_kb()
+        else:
+            vassal_desc = (
+                "😴 **Sizda hozircha birorta ham vassal yo'q.**\n"
+                "Vassalga ega bo'lish uchun **⚔️ Janglar** bo'limida boshqa xonadonlarga hujum qilib, ularni mag'lub eting!"
+            )
+            kb = None
+
+        text = (
+            f"✨ **VALERIYA XAZINASI VA VASSALLIK SOLIQLARI**\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"{overlord_text}"
+            f"{vassal_desc}"
         )
-        return
 
-    vassals = await get_vassals(user_id)
-
-    # O'zining vassallik holati
-    overlord_text = ""
-    if user_house["overlord_id"]:
-        overlord_house = await get_user_house(user_house["overlord_id"])
-        overlord_name = overlord_house["name"] if overlord_house else "Noma'lum"
-        overlord_text = f"⚠️ *Eslatma: Sizning xonadoningiz **{overlord_name}** xonadoniga qaram (vassal).* Har 24 soatda ular sizdan soliq yig'ib olishlari mumkin.\n\n"
-
-    # Soliq taymeri tekshiruvi (24 soat)
-    now = int(time.time())
-    last_tax = user.get("last_tax_collected", 0) or 0
-    cooldown = 24 * 3600
-    if now - last_tax < cooldown:
-        left_sec = cooldown - (now - last_tax)
-        left_h = left_sec // 3600
-        left_m = (left_sec % 3600) // 60
-        timer_status = f"⏳ **Keyingi soliq olish vaqti:** {left_h} soat {left_m} daqiqadan so'ng"
-    else:
-        timer_status = "🟢 **Soliq tayyor!** Hoziroq yig'ib olishingiz mumkin."
-
-    vassals_lines = []
-    for v in vassals:
-        v_owner = await get_user(v["owner_id"])
-        owner_name = v_owner["full_name"] if v_owner else f"Lord #{v['owner_id']}"
-        vassals_lines.append(f"• ⛓ **{v['name']}** (#{v['id']}) — Hukmdor: {owner_name}")
-
-    if vassals:
-        vassals_info = "\n".join(vassals_lines)
-        vassal_desc = (
-            f"👑 **Sizning bo'ysundirilgan vassallaringiz ({len(vassals)} ta):**\n"
-            f"{vassals_info}\n\n"
-            f"📌 *Qoida: Har bir vassaldan har 24 soatda bir marta 20 🪙 soliq yig'ib olinadi.*\n"
-            f"{timer_status}"
-        )
-        kb = taxes_kb()
-    else:
-        vassal_desc = (
-            "😴 **Sizda hozircha birorta ham vassal yo'q.**\n"
-            "Vassalga ega bo'lish uchun **⚔️ Janglar** bo'limida boshqa xonadonlarga hujum qilib, ularni mag'lub eting!"
-        )
-        kb = None
-
-    text = (
-        f"✨ **VALERIYA XAZINASI VA VASSALLIK SOLIQLARI**\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"{overlord_text}"
-        f"{vassal_desc}"
-    )
-
-    await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+        await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Soliqlar menyusida xatolik: {e}", exc_info=True)
+        await message.answer("✨ Soliqlar menyusini yuklashda xatolik yuz berdi.")
 
 @router.callback_query(F.data == "collect_all_taxes")
 async def callback_collect_taxes(callback: types.CallbackQuery):
