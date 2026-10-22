@@ -1,7 +1,8 @@
 from aiogram import Router, F, types
 from database import (
     get_user_house, get_houses, get_house_by_id,
-    choose_house, get_user
+    choose_house, get_user, calculate_player_power,
+    get_user_army, get_user_beasts
 )
 from keyboards import (
     houses_category_kb, houses_page_kb, house_action_kb
@@ -111,32 +112,53 @@ async def callback_house_detail(callback: types.CallbackQuery):
 
         if house["owner_id"]:
             owner_user = await get_user(house["owner_id"])
-            owner_name = escape_md(owner_user["full_name"] if owner_user else f"Lord #{house['owner_id']}")
+            lord_custom = owner_user.get("custom_name") or owner_user.get("full_name") if owner_user else f"Lord #{house['owner_id']}"
+            lord_name_esc = escape_md(lord_custom)
             u_raw = owner_user.get("username") if owner_user else None
-            username_str = f" (@{escape_md(u_raw)})" if u_raw else ""
-            status_str = f"🔒 **Band.** Hukmdor: **{owner_name}**{username_str}"
+            user_tag = f"@{escape_md(u_raw)}" if u_raw else f"[Profil](tg://user?id={house['owner_id']})"
+
+            # Lord stats
+            power_info = await calculate_player_power(house["owner_id"])
+            owner_army = await get_user_army(house["owner_id"])
+            owner_beasts = await get_user_beasts(house["owner_id"])
+            active_dragons = [b for b in owner_beasts if b["beast_type"] == "dragon"]
+
+            overlord_info = ""
             if house["overlord_id"]:
                 overlord_user = await get_user(house["overlord_id"])
-                overlord_name = escape_md(overlord_user["full_name"] if overlord_user else f"#{house['overlord_id']}")
-                ov_raw = overlord_user.get("username") if overlord_user else None
-                overlord_user_str = f" (@{escape_md(ov_raw)})" if ov_raw else ""
-                status_str += f"\n⛓ **Vassal:** Lord **{overlord_name}**{overlord_user_str} ga qaram"
+                ov_name = escape_md(overlord_user.get("custom_name") or overlord_user.get("full_name") if overlord_user else f"#{house['overlord_id']}")
+                ov_u = overlord_user.get("username") if overlord_user else None
+                ov_u_str = f" (@{escape_md(ov_u)})" if ov_u else ""
+                overlord_info = f"\n⛓ **Qaramlik (Vassal):** Lord **{ov_name}**{ov_u_str} xonadoniga qaram"
+
+            castle_txt = f"{house['castle_level']}-darajali Qal'a" if house.get("castle_level") else "Qal'a hali qurilmagan"
+
+            detail_text = (
+                f"🏛 **XONADON: {house_name}** (#{house['id']})\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"👑 **Hukmdor (Lord):** [{lord_name_esc}](tg://user?id={house['owner_id']})\n"
+                f"👤 **Lord Useri:** {user_tag} (ID: `{house['owner_id']}`)\n"
+                f"⚡️ **Harbiy qudrati:** **{power_info['total_active_power']} ball**\n"
+                f"🗡 **Armiya:** {owner_army.get('soldiers', 0)} askar, {owner_army.get('archers', 0)} kamonchi, {owner_army.get('cavalry', 0)} otliq\n"
+                f"🐲 **Ajdarlar:** {len(active_dragons)} ta\n"
+                f"🏰 **Qal'a:** {castle_txt}\n"
+                f"🗺 **Hudud:** **{reg_title}**\n"
+                f"🎖 **Toifasi:** {tier_desc}\n"
+                f"👑 **Maqomi:** {role_desc}{overlord_info}\n"
+                f"━━━━━━━━━━━━━━━━━━━━"
+            )
         else:
-            status_str = "🟢 **BO'SH!** Ushbu xonadonni hoziroq egallashingiz mumkin!"
-
-        castle_info = f"\n🏰 **Qal'a:** {house['castle_level']}-darajali Qal'a mavjud" if house.get("castle_level") else "\n🏰 **Qal'a:** Hali qurilmagan"
-        house_name = escape_md(house.get('name', ''))
-
-        detail_text = (
-            f"🏛 **XONADON: {house_name}** (#{house['id']})\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"🗺 Hudud: **{reg_title}**\n"
-            f"🎖 Toifasi: {tier_desc}\n"
-            f"👑 Maqomi: {role_desc}\n"
-            f"📌 Holati: {status_str}"
-            f"{castle_info}\n"
-            f"━━━━━━━━━━━━━━━━━━━━"
-        )
+            detail_text = (
+                f"🏛 **XONADON: {house_name}** (#{house['id']})\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"🟢 **Holati:** **BO'SH (EGALLANMAGAN)**\n"
+                f"👤 **Lord Useri:** *Hozircha bo'sh — Birinchi bo'lib egallashingiz mumkin!*\n"
+                f"🗺 **Hudud:** **{reg_title}**\n"
+                f"🎖 **Toifasi:** {tier_desc}\n"
+                f"👑 **Maqomi:** {role_desc}\n"
+                f"🏰 **Qal'a:** Hali qurilmagan\n"
+                f"━━━━━━━━━━━━━━━━━━━━"
+            )
 
         await callback.message.edit_text(
             detail_text,
@@ -204,7 +226,7 @@ async def show_all_houses_overview(message: types.Message):
             f"🔍 Xonadon tanlash yoki boshqarish uchun **🌋 Oila tanlash** tugmasini bosing!"
         )
 
-        await message.answer(overview_text, parse_mode="Markdown")
+        await message.answer(overview_text, reply_markup=houses_category_kb(), parse_mode="Markdown")
     except Exception as e:
         logger.error(f"Uylar statistikasini ko'rsatishda xatolik: {e}", exc_info=True)
         await message.answer("🛕 Uylar statistikasini yuklashda xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.")

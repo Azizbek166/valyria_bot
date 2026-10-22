@@ -82,7 +82,7 @@ def build_daily_tasks_text(user_house: Optional[Dict[str, Any]], daily: Dict[str
         f"1. 🛡 **Chegara Patruli va Razvedka:**\n"
         "   • Sarhadlarni ko'zdan kechirish va xavflarni bartaraf etish.\n"
         "   • Sarf: 5 ⚙️ Chakra (Valeriya po'lati bilan tekin)\n"
-        "   • Mukofot: +70..95 🪙 Oltin + askar / chakra / zahar\n"
+        "   • Mukofot: +70..120 🪙 Oltin + askar / chakra\n"
         f"   • Holat: **{t1_status}**\n\n"
         f"2. 🏰 **Garnizon Mudofaasini Kuchaytirish:**\n"
         "   • Qal'a devorlari va harbiy garnizon shayligini ta'minlash.\n"
@@ -96,7 +96,7 @@ def build_daily_tasks_text(user_house: Optional[Dict[str, Any]], daily: Dict[str
         f"   • Holat: **{t3_status}**\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "🏆 **KUNLIK HUDUDIY SUPER-BONUS (3/3):**\n"
-        "• Mukofot: **+350 🪙 Oltin + 100 ⚙️ Chakra + 2 🧪 Zahar + 1 🥷 Yuzsiz Qotil!**\n"
+        "• Mukofot: **+600 🪙 Oltin tanga + 300 ⚙️ Chakra energiyasi!**\n"
         f"• Holat: {super_status}\n"
         "━━━━━━━━━━━━━━━━━━━━"
     )

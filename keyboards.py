@@ -41,7 +41,6 @@ def houses_page_kb(houses: List[Dict[str, Any]], region_key: str, page: int, use
     current_houses = houses[start_idx:end_idx]
 
     rows = []
-    row = []
     for h in current_houses:
         h_id = h["id"]
         h_name = h["name"]
@@ -57,17 +56,21 @@ def houses_page_kb(houses: List[Dict[str, Any]], region_key: str, page: int, use
         else:
             icon = "🟢"
 
-        lord_badge = f" [{tier}-toifa]"
-        btn = InlineKeyboardButton(
-            text=f"{icon} {h_id}. {h_name}{lord_badge}",
-            callback_data=f"h_detail:{h_id}"
-        )
-        row.append(btn)
-        if len(row) == 2:
-            rows.append(row)
-            row = []
-    if row:
-        rows.append(row)
+        if h["owner_id"] is not None:
+            u_name = h.get("owner_username")
+            o_name = h.get("owner_name")
+            if u_name:
+                owner_tag = f" — @{u_name}"
+            elif o_name:
+                owner_tag = f" — {o_name[:12]}"
+            else:
+                owner_tag = " — Band"
+        else:
+            owner_tag = " — [Bo'sh]"
+
+        lord_badge = f" [{tier}]"
+        btn_text = f"{icon} {h_id}. {h_name}{lord_badge}{owner_tag}"
+        rows.append([InlineKeyboardButton(text=btn_text, callback_data=f"h_detail:{h_id}")])
 
     nav_row = []
     if page > 0:

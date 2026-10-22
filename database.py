@@ -1667,8 +1667,8 @@ async def perform_daily_patrol(user_id: int) -> tuple[bool, str]:
         narrative = "🌲 **Varezys O'rmonlari Patruli:**\nVarezys o'rmonlarining chuqurligidagi qadimiy xazina sandig'ini topdingiz va botir ovchilarni saflaringizga qo'shdingiz!"
         gold_rew = 85; troop_rew = 10; chakra_rew = 0; poison_rew = 0
     elif region == "sorcerers":
-        narrative = "🔮 **Jodugarlar Yerlari Patruli:**\nMaeraxes qadimiy harobalaridan sirli sehrli bitiklar va qora qon zaharini qo'lga kiritdingiz!"
-        gold_rew = 80; troop_rew = 0; chakra_rew = 0; poison_rew = 1
+        narrative = "🔮 **Jodugarlar Yerlari Patruli:**\nMaeraxes qadimiy harobalaridan sirli sehrli bitiklar, oltin tangalar va qadimiy chakra energiyasini qo'lga kiritdingiz!"
+        gold_rew = 120; troop_rew = 0; chakra_rew = 35; poison_rew = 0
     elif region == "sea_guardians":
         narrative = "🌊 **Dengiz Qo'riqchilari Patruli:**\nNyzarys qirg'oqlarida Valeriya bo'g'ozi qaroqchilari kemasini yondirib, boy o'lja bilan qaytdingiz!"
         gold_rew = 90; troop_rew = 7; chakra_rew = 0; poison_rew = 0
@@ -1791,33 +1791,27 @@ async def claim_daily_super_bonus(user_id: int) -> tuple[bool, str]:
     if not (tasks["task1_done"] == 1 and tasks["task2_done"] == 1 and tasks["task3_done"] == 1):
         return False, "⚠️ Kunlik Super-Bonusni olish uchun avval barcha 3 ta topshiriqni bajarishingiz kerak!"
 
-    gold_rew = 350
-    chakra_rew = 100
-    poison_rew = 2
-    faceless_rew = 1
+    gold_rew = 600
+    chakra_rew = 300
 
     async with get_db_connection() as db:
         await db.execute("UPDATE users SET gold = gold + ? WHERE telegram_id = ?", (gold_rew, user_id))
         await db.execute("""
             UPDATE armies SET 
-                chakra = chakra + ?,
-                poison = poison + ?,
-                faceless = faceless + ?
+                chakra = chakra + ?
             WHERE user_id = ?
-        """, (chakra_rew, poison_rew, faceless_rew, user_id))
+        """, (chakra_rew, user_id))
         await db.execute("UPDATE daily_territory_tasks SET super_claimed = 1 WHERE user_id = ?", (user_id,))
         await db.commit()
 
     res_text = (
         "🏆 **VALERIYA KUNLIK HUDUDIY SUPER-BONUSI QO'LGA KIRITILDI!**\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "Siz bugun barcha 3 ta hududiy topshiriqni a'lo darajada bajardingiz va Valeriya Oliy Kengashi sizni eng yuksak tuhfalar bilan taqdirladi:\n\n"
-        f"💰 **+{gold_rew} 🪙 Oltin**\n"
-        f"⚙️ **+{chakra_rew} ⚙️ Chakra**\n"
-        f"🧪 **+{poison_rew} ta Zahar**\n"
-        f"🥷 **+{faceless_rew} ta Yuzsiz Qotil**\n"
+        "Siz bugun barcha 3 ta hududiy topshiriqni a'lo darajada bajardingiz va Valeriya Oliy Kengashi sizni boy xazina bilan taqdirladi:\n\n"
+        f"💰 **+{gold_rew} 🪙 Oltin tanga**\n"
+        f"⚙️ **+{chakra_rew} ⚙️ Chakra energiyasi**\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "🌟 Xazinangiz va qo'shiningiz yanada qudratli bo'ldi! Ertaga yana yangi g'alabalar sari olg'a!"
+        "🌟 Xazinangiz va ruhiy qudratingiz yanada ortdi! Ertaga yana yangi g'alabalar sari olg'a!"
     )
     return True, res_text
 
