@@ -768,12 +768,14 @@ async def callback_battle_resolve(callback: types.CallbackQuery):
     # Himoyachiga ham jang hisobotini yuborish
     if res.get("defender_id"):
         try:
+            res_status_str = "💀 Mag'lubiyatga uchradingiz" if res['attacker_won'] else "🛡 Hujumni muvaffaqiyatli qaytardingiz!"
+            loot_str = f"Boy berilgan oltin: -{res['loot_gold']} 🪙\n" if res['attacker_won'] else ""
             def_alert = (
                 f"⚔️ **QAL'ANGIZGA QILINGAN HUJUM YAKUNLANDI!**\n\n"
                 f"Hujumchi: **{res['attacker_house']}**\n"
-                f"Natija: {'💀 Mag\'lubiyatga uchradingiz' if res['attacker_won'] else '🛡 Hujumni muvaffaqiyatli qaytardingiz!'}\n"
+                f"Natija: {res_status_str}\n"
                 f"Talafot: -{res['defender_loss']} askar\n"
-                f"{f'Boy berilgan oltin: -{res['loot_gold']} 🪙' if res['attacker_won'] else ''}"
+                f"{loot_str}"
             )
             await callback.bot.send_message(res["defender_id"], def_alert, parse_mode="Markdown")
         except Exception:
