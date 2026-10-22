@@ -9,7 +9,8 @@ from database import (
     admin_unfreeze_dragons, admin_unfreeze_all_dragons,
     admin_give_gold_add, get_houses, get_db_connection,
     admin_restart_game, set_user_blocked, admin_transfer_house,
-    approve_donation_request, reject_donation_request, get_user
+    approve_donation_request, reject_donation_request, get_user,
+    distribute_weekly_tournament_rewards
 )
 from keyboards import (
     admin_panel_kb, admin_restart_confirm_kb,
@@ -659,3 +660,18 @@ async def callback_reject_donation(callback: types.CallbackQuery):
                 pass
     else:
         await callback.answer(msg, show_alert=True)
+
+@router.callback_query(F.data == "admin_distribute_tournament")
+async def callback_admin_distribute_tournament(callback: types.CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("Faqat admin uchun!", show_alert=True)
+        return
+
+    success, msg = await distribute_weekly_tournament_rewards()
+    await callback.answer(msg, show_alert=True)
+    if success:
+        await callback.message.answer(
+            f"🎁 **Haftalik Turnir Sovg'alari Tarqatildi!**\n\n{msg}",
+            parse_mode="Markdown"
+        )
+

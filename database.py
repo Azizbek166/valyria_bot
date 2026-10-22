@@ -63,6 +63,12 @@ async def init_db():
             await db.execute("ALTER TABLE users ADD COLUMN debt_taken_at INTEGER DEFAULT 0")
         if "last_battle_time" not in u_columns:
             await db.execute("ALTER TABLE users ADD COLUMN last_battle_time INTEGER DEFAULT 0")
+        if "tournament_points" not in u_columns:
+            await db.execute("ALTER TABLE users ADD COLUMN tournament_points INTEGER DEFAULT 0")
+        if "tournament_wins" not in u_columns:
+            await db.execute("ALTER TABLE users ADD COLUMN tournament_wins INTEGER DEFAULT 0")
+        if "tournament_fights" not in u_columns:
+            await db.execute("ALTER TABLE users ADD COLUMN tournament_fights INTEGER DEFAULT 0")
 
         # Houses jadvali (52 ta xonadon, 5 ta hudud)
         await db.execute("""
@@ -1377,6 +1383,100 @@ async def get_top_players(limit: int = 10) -> List[Dict[str, Any]]:
         """, (limit,))
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
+
+# --- 1000 Yillik Qadimgi Turnir: Ritserlar Baxsi ---
+
+async def record_tournament_battle(user_id: int, won: bool) -> tuple[int, int, int]:
+    points_gained = 20 if won else 5
+    gold_gained = 25 if won else 0
+    win_inc = 1 if won else 0
+
+    async with get_db_connection() as db:
+        await db.execute("""
+            UPDATE users SET
+                tournament_points = tournament_points + ?,
+                tournament_wins = tournament_wins + ?,
+                tournament_fights = tournament_fights + 1,
+                gold = gold + ?
+            WHERE telegram_id = ?
+        """, (points_gained, win_inc, gold_gained, user_id))
+        await db.commit()
+
+        cursor = await db.execute("SELECT tournament_points FROM users WHERE telegram_id = ?", (user_id,))
+        row = await cursor.fetchone()
+        new_total = row["tournament_points"] if row else points_gained
+
+    return points_gained, new_total, gold_gained
+
+async def get_tournament_top_players(limit: int = 20) -> List[Dict[str, Any]]:
+    async with get_db_connection() as db:
+        cursor = await db.execute("""
+            SELECT u.telegram_id, COALESCE(u.custom_name, u.full_name) as full_name, u.username,
+                   u.tournament_points, u.tournament_wins, u.tournament_fights,
+                   h.name as house_name, h.tier
+            FROM users u
+            LEFT JOIN houses h ON h.owner_id = u.telegram_id
+            WHERE u.tournament_points > 0 OR u.tournament_fights > 0
+            ORDER BY u.tournament_points DESC, u.tournament_wins DESC
+            LIMIT ?
+        """, (limit,))
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+async def get_user_tournament_stats(user_id: int) -> Dict[str, Any]:
+    async with get_db_connection() as db:
+        cursor = await db.execute("""
+            SELECT tournament_points, tournament_wins, tournament_fights
+            FROM users WHERE telegram_id = ?
+        """, (user_id,))
+        row = await cursor.fetchone()
+        if not row:
+            return {"points": 0, "wins": 0, "fights": 0, "rank": "-"}
+
+        pts = row["tournament_points"] or 0
+        cursor = await db.execute("SELECT COUNT(*) as higher_rank FROM users WHERE tournament_points > ?", (pts,))
+        higher = (await cursor.fetchone())["higher_rank"]
+        rank = higher + 1 if pts > 0 else "-"
+
+        return {
+            "points": pts,
+            "wins": row["tournament_wins"] or 0,
+            "fights": row["tournament_fights"] or 0,
+            "rank": rank
+        }
+
+async def distribute_weekly_tournament_rewards() -> tuple[bool, str]:
+    top_players = await get_tournament_top_players(limit=5)
+    if not top_players:
+        return False, "Turnirda hali ishtirokchilar mavjud emas."
+
+    async with get_db_connection() as db:
+        for idx, player in enumerate(top_players):
+            uid = player["telegram_id"]
+            rank = idx + 1
+            if rank == 1:
+                await db.execute("UPDATE armies SET unsullied = unsullied + 200 WHERE user_id = ?", (uid,))
+                await db.execute(
+                    "INSERT INTO beasts (user_id, beast_type, name, grade, power, frozen_until) VALUES (?, 'dragon', 'Turnir Ajdari', 'C', 500, 0)",
+                    (uid,)
+                )
+            elif rank == 2:
+                await db.execute("UPDATE armies SET unsullied = unsullied + 150 WHERE user_id = ?", (uid,))
+                await db.execute(
+                    "INSERT INTO beasts (user_id, beast_type, name, grade, power, frozen_until) VALUES (?, 'spider', 'Turnir Oʻrgimchagi', 'C', 500, 0)",
+                    (uid,)
+                )
+            elif rank == 3:
+                await db.execute("UPDATE armies SET unsullied = unsullied + 100, faceless = faceless + 1 WHERE user_id = ?", (uid,))
+            elif rank == 4:
+                await db.execute("UPDATE armies SET chakra = chakra + 150 WHERE user_id = ?", (uid,))
+            elif rank == 5:
+                await db.execute("UPDATE armies SET chakra = chakra + 100 WHERE user_id = ?", (uid,))
+
+        await db.execute("UPDATE users SET tournament_points = 0")
+        await db.commit()
+
+    return True, f"Haftalik turnir sovg'alari {len(top_players)} nafar g'olibga topshirildi va ochkolar yangilandi!"
 
 # --- Qal'alar (Castles) Tizimi ---
 

@@ -18,7 +18,7 @@ def main_menu_keyboard(user_id: int) -> ReplyKeyboardMarkup:
         [KeyboardButton(text="⚔️ Janglar"), KeyboardButton(text="🐉 Hayvonlarim 🕷")],
         [KeyboardButton(text="✨ Soliqlar"), KeyboardButton(text="🥇 Reyting")],
         [KeyboardButton(text="🏞 Valeria Ekspiditsya"), KeyboardButton(text="⚔️ Sword Bank")],
-        [KeyboardButton(text="🛘 Hududiy topshiriqlar")]
+        [KeyboardButton(text="🛘 Hududiy topshiriqlar"), KeyboardButton(text="⛓💥 Ritserlar Baxsi")]
     ]
     if user_id in ADMIN_IDS:
         buttons.append([KeyboardButton(text="👑 Admin paneli")])
@@ -368,6 +368,7 @@ def admin_panel_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="❄️ Ajdarlarni muzdan chiqarish", callback_data="admin_unfreeze")],
         [InlineKeyboardButton(text="🔄 Xonadonni ko'chirish", callback_data="admin_transfer_house")],
         [InlineKeyboardButton(text="🏠 Xonadonni bo'shatish", callback_data="admin_clear_house")],
+        [InlineKeyboardButton(text="🎁 Turnir haftalik sovg'alarini tarqatish", callback_data="admin_distribute_tournament")],
         [InlineKeyboardButton(text="📊 To'liq statistika", callback_data="admin_stats")],
         [InlineKeyboardButton(text="⚠️ O'yinni Restart qilish (Reset)", callback_data="admin_restart_prompt")]
     ])
@@ -508,11 +509,60 @@ def daily_tasks_kb(tasks: Dict[str, Any]) -> InlineKeyboardMarkup:
     if super_claimed:
         rows.append([InlineKeyboardButton(text="🌟 Bugungi Super-Bonus olindi!", callback_data="noop")])
     elif all_done:
-        rows.append([InlineKeyboardButton(text="🎁 KUNLIK SUPER-BONUSNI OLISH (+350 🪙)", callback_data="daily_super_bonus")])
+        rows.append([InlineKeyboardButton(text="🎁 KUNLIK SUPER-BONUSNI OLISH (+600 🪙)", callback_data="daily_super_bonus")])
     else:
         done_count = sum([1 for x in [t1_done, t2_done, t3_done] if x])
         rows.append([InlineKeyboardButton(text=f"⏳ Super-Bonus ({done_count}/3 bajarildi)", callback_data="noop")])
 
     rows.append([InlineKeyboardButton(text="🔄 Yangilash", callback_data="daily_tasks_refresh")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+# --- 1000 Yillik Qadimgi Turnir: Ritserlar Baxsi Klaviaturalari ---
+
+def tournament_menu_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⚔️ Maydonga tushish (Jang boshlash)", callback_data="tourn_start_fight")],
+        [InlineKeyboardButton(text="🏆 Reytinglar Top 20", callback_data="tourn_top20")],
+        [InlineKeyboardButton(text="🎁 Haftalik Sovg'alar (1-5 o'rin)", callback_data="tourn_rewards_info")],
+        [InlineKeyboardButton(text="📜 Turnir Qoidalari", callback_data="tourn_rules")]
+    ])
+
+def tournament_attack_zone_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🗣 Bosh", callback_data="tourn_att:bosh"),
+            InlineKeyboardButton(text="👤 Tana", callback_data="tourn_att:tana"),
+            InlineKeyboardButton(text="👣 Oyoq", callback_data="tourn_att:oyoq")
+        ],
+        [InlineKeyboardButton(text="🏳 Jangdan chekinish", callback_data="tourn_retreat")]
+    ])
+
+def tournament_defend_zone_kb(attack_zone: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🗣 Bosh", callback_data=f"tourn_def:{attack_zone}:bosh"),
+            InlineKeyboardButton(text="👤 Tana", callback_data=f"tourn_def:{attack_zone}:tana"),
+            InlineKeyboardButton(text="👣 Oyoq", callback_data=f"tourn_def:{attack_zone}:oyoq")
+        ],
+        [InlineKeyboardButton(text="🏳 Jangdan chekinish", callback_data="tourn_retreat")]
+    ])
+
+def tournament_round_result_kb(is_game_over: bool = False) -> InlineKeyboardMarkup:
+    if is_game_over:
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⚔️ Yangi Jang Boshlash", callback_data="tourn_start_fight")],
+            [InlineKeyboardButton(text="🏆 Top 20 Reyting", callback_data="tourn_top20")],
+            [InlineKeyboardButton(text="🔙 Turnir Maydoni", callback_data="tourn_menu_back")]
+        ])
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⚔️ Keyingi Raund (Hujum qilish)", callback_data="tourn_next_round")],
+        [InlineKeyboardButton(text="🏳 Taslim bo'lish", callback_data="tourn_retreat")]
+    ])
+
+def tournament_top20_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⚔️ Turnir Jangiga Kirish", callback_data="tourn_start_fight")],
+        [InlineKeyboardButton(text="🎁 Haftalik Sovg'alar", callback_data="tourn_rewards_info")],
+        [InlineKeyboardButton(text="🔙 Turnir Maydoni", callback_data="tourn_menu_back")]
+    ])
 
