@@ -11,7 +11,7 @@ from config import (
     UNITS, DRAGON_GRADES, DRAGON_FREEZE_SECONDS, REGIONS,
     ESSOS_MARKET, CASTLE_INCOME, CASTLE_COST, TIER_A_HOUSES,
     DONATE_PACKAGES, CHAKRA_DAILY_LIMIT, LOAN_PACKAGES,
-    BATTLE_DURATION_SECONDS
+    BATTLE_DURATION_SECONDS, WESTEROS_TARGETS
 )
 
 @asynccontextmanager
@@ -260,6 +260,20 @@ async def init_db():
                 call_id INTEGER DEFAULT 0,
                 status TEXT DEFAULT 'marching',
                 created_at INTEGER
+            )
+        """)
+
+        # Westerosni talon-taroj qilish (Westeros Raids) jadvali
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS westeros_raids (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                target_id TEXT NOT NULL,
+                last_raided_at INTEGER DEFAULT 0,
+                total_looted_gold INTEGER DEFAULT 0,
+                total_looted_chakra INTEGER DEFAULT 0,
+                raids_count INTEGER DEFAULT 0,
+                UNIQUE(user_id, target_id)
             )
         """)
 
@@ -2230,3 +2244,133 @@ async def admin_give_gold_add(telegram_id: int, amount: int) -> tuple[bool, str,
         await db.execute("UPDATE users SET gold = ? WHERE telegram_id = ?", (new_gold, telegram_id))
         await db.commit()
         return True, f"O'yinchiga {amount} 🪙 oltin berildi! Yangi balans: {new_gold} 🪙", new_gold
+
+# --- Westerosni Talon-Taroj Qilish (Westeros Raids) ---
+
+async def get_user_westeros_cooldowns(user_id: int) -> Dict[str, Any]:
+    now = int(time.time())
+    result = {}
+    async with get_db_connection() as db:
+        cursor = await db.execute("SELECT target_id, last_raided_at FROM westeros_raids WHERE user_id = ?", (user_id,))
+        rows = await cursor.fetchall()
+        user_raids = {r["target_id"]: r["last_raided_at"] for r in rows}
+
+    for t_id, target in WESTEROS_TARGETS.items():
+        last_t = user_raids.get(t_id, 0)
+        cd = target["cooldown_seconds"]
+        passed = now - last_t
+        if passed >= cd:
+            result[t_id] = {"ready": True, "left_seconds": 0, "left_str": "Tayyor ⚔️"}
+        else:
+            left = cd - passed
+            h = left // 3600
+            m = (left % 3600) // 60
+            s = left % 60
+            if h > 0:
+                t_str = f"{h}s {m}d"
+            elif m > 0:
+                t_str = f"{m}d {s}s"
+            else:
+                t_str = f"{s} soniya"
+            result[t_id] = {"ready": False, "left_seconds": left, "left_str": f"⏳ {t_str}"}
+    return result
+
+async def get_user_westeros_stats(user_id: int) -> Dict[str, Any]:
+    async with get_db_connection() as db:
+        cursor = await db.execute("""
+            SELECT SUM(raids_count) as total_raids,
+                   SUM(total_looted_gold) as total_gold,
+                   SUM(total_looted_chakra) as total_chakra
+            FROM westeros_raids WHERE user_id = ?
+        """, (user_id,))
+        row = await cursor.fetchone()
+        if not row or row["total_raids"] is None:
+            return {"total_raids": 0, "total_gold": 0, "total_chakra": 0}
+        return {
+            "total_raids": row["total_raids"] or 0,
+            "total_gold": row["total_gold"] or 0,
+            "total_chakra": row["total_chakra"] or 0
+        }
+
+async def execute_westeros_raid(user_id: int, target_id: str) -> tuple[bool, str, Dict[str, Any]]:
+    target = WESTEROS_TARGETS.get(target_id)
+    if not target:
+        return False, "Noto'g'ri nishon tanlandi!", {}
+
+    now = int(time.time())
+    async with get_db_connection() as db:
+        cursor = await db.execute("SELECT last_raided_at FROM westeros_raids WHERE user_id = ? AND target_id = ?", (user_id, target_id))
+        row = await cursor.fetchone()
+
+    if row:
+        diff = now - row["last_raided_at"]
+        if diff < target["cooldown_seconds"]:
+            left = target["cooldown_seconds"] - diff
+            h = left // 3600
+            m = (left % 3600) // 60
+            s = left % 60
+            if h > 0:
+                t_str = f"{h} soat {m} daqiqa"
+            elif m > 0:
+                t_str = f"{m} daqiqa {s} soniya"
+            else:
+                t_str = f"{s} soniya"
+            return False, f"⏳ Ushbu manzilga qayta hujum qilish uchun hali {t_str} kutish kerak!", {}
+
+    power_info = await calculate_player_power(user_id)
+    total_power = power_info.get("total_active_power", 0)
+
+    if total_power < target["min_power"]:
+        return False, f"❌ Sizning harbiy qudratingiz ({total_power} ball) bu nishon uchun yetarli emas! Kamida {target['min_power']} ball talab etiladi.", {}
+
+    active_dragons = power_info.get("active_dragons", [])
+    if target.get("requires_dragon") and len(active_dragons) == 0:
+        return False, "❌ Ushbu ulkan qal'ani zabt etish uchun safingizda kamida bitta faol Ajdar bo'lishi shart!", {}
+
+    looted_gold = random.randint(target["gold_min"], target["gold_max"])
+    looted_chakra = random.randint(target["chakra_min"], target["chakra_max"])
+    looted_unsullied = target.get("unsullied_loot", 0)
+    got_steel = 1 if random.random() < target.get("valyrian_steel_chance", 0.0) else 0
+
+    army = await get_user_army(user_id) or {}
+    curr_soldiers = army.get("soldiers", 0)
+    loss_soldiers = min(curr_soldiers, random.randint(target["loss_min"], target["loss_max"])) if curr_soldiers > 0 else 0
+
+    async with get_db_connection() as db:
+        await db.execute("""
+            UPDATE users SET
+                gold = gold + ?,
+                valyrian_steel = valyrian_steel + ?
+            WHERE telegram_id = ?
+        """, (looted_gold, got_steel, user_id))
+
+        await db.execute("""
+            UPDATE armies SET
+                soldiers = MAX(0, soldiers - ?),
+                chakra = chakra + ?,
+                unsullied = unsullied + ?
+            WHERE user_id = ?
+        """, (loss_soldiers, looted_chakra, looted_unsullied, user_id))
+
+        await db.execute("""
+            INSERT INTO westeros_raids (user_id, target_id, last_raided_at, total_looted_gold, total_looted_chakra, raids_count)
+            VALUES (?, ?, ?, ?, ?, 1)
+            ON CONFLICT(user_id, target_id) DO UPDATE SET
+                last_raided_at = excluded.last_raided_at,
+                total_looted_gold = total_looted_gold + excluded.total_looted_gold,
+                total_looted_chakra = total_looted_chakra + excluded.total_looted_chakra,
+                raids_count = raids_count + 1
+        """, (user_id, target_id, now, looted_gold, looted_chakra))
+        await db.commit()
+
+    report = {
+        "target": target,
+        "looted_gold": looted_gold,
+        "looted_chakra": looted_chakra,
+        "looted_unsullied": looted_unsullied,
+        "got_steel": got_steel,
+        "loss_soldiers": loss_soldiers,
+        "total_power": total_power
+    }
+    return True, "Muvaffaqiyatli", report
+

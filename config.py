@@ -387,3 +387,98 @@ def escape_md(text: Any) -> str:
         res = res.replace(ch, "\\" + ch)
     return res
 
+# --- Westerosni Talon-Taroj Qilish (Westeros Raids) Nishonlari ---
+WESTEROS_TARGETS = {
+    "coastal_villages": {
+        "id": "coastal_villages",
+        "name": "🌊 Qirg'oq Qishloqlari va Savdo Kemalar",
+        "region_name": "Tor Dengiz Sohillari",
+        "difficulty": "🟢 Oson (Boshlang'ich)",
+        "min_power": 50,
+        "requires_dragon": False,
+        "cooldown_seconds": 1800,  # 30 daqiqa
+        "gold_min": 150,
+        "gold_max": 350,
+        "chakra_min": 20,
+        "chakra_max": 50,
+        "unsullied_loot": 0,
+        "valyrian_steel_chance": 0.0,
+        "loss_min": 1,
+        "loss_max": 3,
+        "desc": "Westerosning himoyasiz baliqchilar qishloqlari va dengizdagi boy savdo kemalari. Kam kuch bilan tezkor o'lja olish uchun eng qulay joy."
+    },
+    "casterly_rock": {
+        "id": "casterly_rock",
+        "name": "🦁 Casterly Rock (Lannisterlar Oltin Konlari)",
+        "region_name": "G'arbiy Qoyatosh",
+        "difficulty": "🟡 O'rta",
+        "min_power": 250,
+        "requires_dragon": False,
+        "cooldown_seconds": 7200,  # 2 soat
+        "gold_min": 600,
+        "gold_max": 1200,
+        "chakra_min": 80,
+        "chakra_max": 160,
+        "unsullied_loot": 0,
+        "valyrian_steel_chance": 0.0,
+        "loss_min": 3,
+        "loss_max": 8,
+        "desc": "Lannisterlar sulolasining afsonaviy oltin konlari. Bu yerdagi konlar asrlar davomida Westerosning eng katta boylik manbai bo'lib kelgan."
+    },
+    "highgarden": {
+        "id": "highgarden",
+        "name": "🌹 Highgarden va Reach Dalalari (Tyrellar)",
+        "region_name": "Reach Unumdor Yerlari",
+        "difficulty": "🟠 Qiyin",
+        "min_power": 600,
+        "requires_dragon": False,
+        "cooldown_seconds": 14400,  # 4 soat
+        "gold_min": 1500,
+        "gold_max": 2800,
+        "chakra_min": 180,
+        "chakra_max": 300,
+        "unsullied_loot": 15,
+        "valyrian_steel_chance": 0.05,
+        "loss_min": 8,
+        "loss_max": 15,
+        "desc": "Westerosning eng serhosil va boy viloyati. Qasr omborlarida mislsiz xazina va unumdor boyliklar saqlanadi. Asirlardan jangchilar o'lja qilinadi."
+    },
+    "kings_landing": {
+        "id": "kings_landing",
+        "name": "👑 Qirollik Qo'nimgohi (King's Landing — Qizil Qasr)",
+        "region_name": "Westeros Poytaxti",
+        "difficulty": "🔴 Og'ir (Katta reyd)",
+        "min_power": 1500,
+        "requires_dragon": True,
+        "cooldown_seconds": 28800,  # 8 soat
+        "gold_min": 3500,
+        "gold_max": 6500,
+        "chakra_min": 400,
+        "chakra_max": 700,
+        "unsullied_loot": 30,
+        "valyrian_steel_chance": 0.15,
+        "loss_min": 15,
+        "loss_max": 30,
+        "desc": "Temir Taxt joylashgan poytaxt shahar. Qizil Qasr xazinasi yetti qirollikning soliqlariga to'la. Hujum uchun qudratli armiya va kamida 1 ta Ajdar talab etiladi."
+    },
+    "winterfell": {
+        "id": "winterfell",
+        "name": "🐺 Winterfell (Shimolning Qadimiy Qal'asi)",
+        "region_name": "Shimol Qirolligi",
+        "difficulty": "🟣 Afsonaviy (Elita)",
+        "min_power": 3000,
+        "requires_dragon": True,
+        "cooldown_seconds": 43200,  # 12 soat
+        "gold_min": 7000,
+        "gold_max": 12000,
+        "chakra_min": 800,
+        "chakra_max": 1200,
+        "unsullied_loot": 50,
+        "valyrian_steel_chance": 0.35,
+        "loss_min": 25,
+        "loss_max": 50,
+        "desc": "Ming yillik muz va po'lat qal'asi. Faqat eng qudratli Valeriya Lordlari Shimolning qattiq sovuqlari va Starklar qarshiligini yengib, ulkan boylik olib qayta oladi."
+    }
+}
+
+

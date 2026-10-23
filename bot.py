@@ -24,6 +24,7 @@ from handlers.green_bank import router as green_bank_router
 from handlers.castle import router as castle_router
 from handlers.alliance import router as alliance_router
 from handlers.tournament import router as tournament_router
+from handlers.westeros import router as westeros_router
 
 import os
 import aiohttp
@@ -103,6 +104,7 @@ async def main():
     dp.include_router(admin_router)
     dp.include_router(essos_router)
     dp.include_router(tournament_router)
+    dp.include_router(westeros_router)
 
     # Eski kutilayotgan yangilanishlarni o'tkazib yuborish
     await bot.delete_webhook(drop_pending_updates=True)

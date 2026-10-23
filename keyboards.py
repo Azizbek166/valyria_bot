@@ -18,7 +18,8 @@ def main_menu_keyboard(user_id: int) -> ReplyKeyboardMarkup:
         [KeyboardButton(text="⚔️ Janglar"), KeyboardButton(text="🐉 Hayvonlarim 🕷")],
         [KeyboardButton(text="✨ Soliqlar"), KeyboardButton(text="🥇 Reyting")],
         [KeyboardButton(text="🏞 Valeria Ekspiditsya"), KeyboardButton(text="⚔️ Sword Bank")],
-        [KeyboardButton(text="🛘 Hududiy topshiriqlar"), KeyboardButton(text="⛓💥 Ritserlar Baxsi")]
+        [KeyboardButton(text="🛘 Hududiy topshiriqlar"), KeyboardButton(text="⛓💥 Ritserlar Baxsi")],
+        [KeyboardButton(text="🏴‍☠️ Westerosni Talon-Taroj")]
     ]
     if user_id in ADMIN_IDS:
         buttons.append([KeyboardButton(text="👑 Admin paneli")])
@@ -565,4 +566,38 @@ def tournament_top20_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🎁 Haftalik Sovg'alar", callback_data="tourn_rewards_info")],
         [InlineKeyboardButton(text="🔙 Turnir Maydoni", callback_data="tourn_menu_back")]
     ])
+
+# --- Westerosni Talon-Taroj Qilish Klaviaturalari ---
+
+def westeros_targets_kb(cooldowns: Dict[str, Any]) -> InlineKeyboardMarkup:
+    from config import WESTEROS_TARGETS
+    rows = []
+    for t_id, target in WESTEROS_TARGETS.items():
+        cd_info = cooldowns.get(t_id, {})
+        status_badge = cd_info.get("left_str", "Tayyor ⚔️")
+        btn_text = f"{target['name']} | {status_badge}"
+        rows.append([InlineKeyboardButton(text=btn_text, callback_data=f"w_target:{t_id}")])
+
+    rows.append([
+        InlineKeyboardButton(text="📊 Reyd Tarixi va Statistikam", callback_data="w_stats"),
+        InlineKeyboardButton(text="🔄 Yangilash", callback_data="w_refresh")
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+def westeros_target_detail_kb(target_id: str, is_ready: bool) -> InlineKeyboardMarkup:
+    rows = []
+    if is_ready:
+        rows.append([InlineKeyboardButton(text="⚔️ FLOT VA QO'SHIN BILAN HUJUM! 🔥", callback_data=f"w_attack:{target_id}")])
+    else:
+        rows.append([InlineKeyboardButton(text="⏳ Qayta tiklanmoqda (Kuting)", callback_data="noop")])
+
+    rows.append([InlineKeyboardButton(text="🔙 Nishonlar ro'yxatiga qaytish", callback_data="w_back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+def westeros_raid_result_kb(target_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🗺 Boshqa nishonni tanlash", callback_data="w_back")],
+        [InlineKeyboardButton(text="📊 Mening reydlarim", callback_data="w_stats")]
+    ])
+
 
