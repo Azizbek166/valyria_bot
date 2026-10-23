@@ -26,6 +26,7 @@ from handlers.alliance import router as alliance_router
 from handlers.tournament import router as tournament_router
 
 import os
+import aiohttp
 from aiohttp import web
 
 logging.basicConfig(
@@ -33,6 +34,20 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+async def keep_awake_pinger():
+    """Render bepul tarifida 15 daqiqa harakatsizlikdan so'ng uxlab qolmasligi uchun har 10 daqiqada so'rov yuborish"""
+    render_url = os.getenv("RENDER_EXTERNAL_URL", "https://valyria-bot-ct42.onrender.com")
+    health_url = f"{render_url.rstrip('/')}/health"
+    await asyncio.sleep(45)  # Dastlabki yuklanishni kutish
+    async with aiohttp.ClientSession() as session:
+        while True:
+            try:
+                async with session.get(health_url, timeout=20) as resp:
+                    logger.info(f"Keep-awake ping muvaffaqiyatli: {resp.status}")
+            except Exception as e:
+                logger.warning(f"Keep-awake ping xatosi: {e}")
+            await asyncio.sleep(600)  # Har 10 daqiqada bir marta (Render 15 daqiqada uxlaydi)
 
 async def start_health_server():
     """Bulutli bepul serverlar (Render, Koyeb va h.k.) 24/7 uxlab qolmasligi uchun health-check veb serveri"""
@@ -60,6 +75,7 @@ async def main():
     # 24/7 keep-alive serverini yoqish
     try:
         await start_health_server()
+        asyncio.create_task(keep_awake_pinger())
     except Exception as e:
         logger.warning(f"Health server ishga tushmadi (lokal rejim): {e}")
 
