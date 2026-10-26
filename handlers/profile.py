@@ -8,7 +8,8 @@ from database import (
     get_or_create_user, get_user_house, get_user_army,
     get_user_beasts, calculate_player_power, get_vassals, get_house_by_id,
     get_region_bannermen, get_house_castle, get_house_alliance,
-    get_house_all_alliances, set_user_custom_name, get_user
+    get_house_all_alliances, set_user_custom_name, get_user,
+    get_user_witches, red_witch_unfreeze_dragon
 )
 from keyboards import profile_custom_name_kb
 from config import REGIONS, escape_md
@@ -103,6 +104,7 @@ async def build_profile_text(user_id: int, telegram_user: types.User) -> str:
     dragons_info = []
     dragons = [b for b in beasts if b["beast_type"] == "dragon"]
     spiders = [b for b in beasts if b["beast_type"] == "spider"]
+    witches = await get_user_witches(user_id)
 
     for d in dragons:
         d_name = escape_md(d['name'])
@@ -115,7 +117,17 @@ async def build_profile_text(user_id: int, telegram_user: types.User) -> str:
             dragons_info.append(f"🐲 {d_name} ({d['grade']}-daraja, {d['power']} ball) [🔥 Faol]")
 
     dragons_str = "\n   ".join(dragons_info) if dragons_info else "Mavjud emas"
-    spiders_str = f"{len(spiders)} ta (Har biri 500 ball, Jami: {len(spiders) * 500} ball)" if spiders else "Mavjud emas"
+    spiders_info = []
+    for s in spiders:
+        s_name = escape_md(s.get("name") or "O'rgamchak")
+        if s.get("frozen_until", 0) > now:
+            rem = s["frozen_until"] - now
+            hours = rem // 3600
+            mins = (rem % 3600) // 60
+            spiders_info.append(f"🕷 {s_name} ({s.get('power', 500)} ball) [❄️ Muzlagan: {hours}s {mins}d]")
+        else:
+            spiders_info.append(f"🕷 {s_name} ({s.get('power', 500)} ball) [🔥 Faol]")
+    spiders_str = "\n   ".join(spiders_info) if spiders_info else "Mavjud emas"
 
     essos_units = []
     if army.get('unsullied', 0) > 0:
@@ -127,6 +139,18 @@ async def build_profile_text(user_id: int, telegram_user: types.User) -> str:
     if army.get('poison', 0) > 0:
         essos_units.append(f"🧪 Zahar: {army['poison']} ta (Kuch: {army['poison'] * 300})")
     essos_str = ("\n  " + "\n  ".join(essos_units)) if essos_units else ""
+
+    # Jodugarlar tarkibi
+    witch_lines = []
+    if witches.get("red_witch", 0) > 0:
+        witch_lines.append(f"• 👩‍🦰 **Qizil Jodugar:** {witches['red_witch']} ta (Kunlik muzlagan ajdarni eritish + 1 tezkor ko'rish)")
+    if witches.get("blood_witch", 0) > 0:
+        witch_lines.append(f"• 🩸 **Qon Jodugari:** {witches['blood_witch']} ta (Dushman josuslariga qarshi kuniga 2 marta avto-himoya)")
+    if witches.get("water_witch", 0) > 0:
+        witch_lines.append(f"• 🧙 **Suv Jodugari:** {witches['water_witch']} ta (Qal'a mudofaasida dushmanning 2 ajdarini o'ldiradi)")
+    if witches.get("shadow_witch", 0) > 0:
+        witch_lines.append(f"• 🔮 **Soya Jodugari:** {witches['shadow_witch']} ta (Qal'a mudofaasida dushmanning 2 o'rgamchagini o'ldiradi)")
+    witches_str = ("\n\n🧙 **JODUGARLAR (WITCHES):**\n" + "\n".join(witch_lines)) if witch_lines else ""
 
     # Lord ismi
     custom_name = user.get("custom_name")
@@ -159,20 +183,40 @@ async def build_profile_text(user_id: int, telegram_user: types.User) -> str:
         f"{essos_str}\n\n"
         f"🐉 **MAXLUQLAR VA AJDARLAR:**\n"
         f"  {dragons_str}\n"
-        f"  🕷 O'rgimchaklar: {spiders_str}\n"
+        f"  🕷 O'rgamchaklar:\n   {spiders_str}"
+        f"{witches_str}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"ℹ️ *Eslatma: Jangda qatnashgan ajdarlar 3 kunga muzlaydi.*"
+        f"ℹ️ *Eslatma: Jangda qatnashgan ajdarlar 3 kunga (72 soat), o'rgamchaklar esa 28 soatga muzlaydi.*"
     )
     return profile_text
 
 @router.message(F.text == "👤 Profil")
 async def show_profile(message: types.Message):
     try:
-        profile_text = await build_profile_text(message.from_user.id, message.from_user)
-        await message.answer(profile_text, reply_markup=profile_custom_name_kb(), parse_mode="Markdown")
+        user_id = message.from_user.id
+        profile_text = await build_profile_text(user_id, message.from_user)
+        witches = await get_user_witches(user_id)
+        has_red = witches.get("red_witch", 0) > 0
+        await message.answer(profile_text, reply_markup=profile_custom_name_kb(has_red_witch=has_red), parse_mode="Markdown")
     except Exception as e:
         logger.error(f"Profil ko'rsatishda xatolik: {e}", exc_info=True)
         await message.answer("👤 Profil ma'lumotlarini yuklashda xatolik yuz berdi.")
+
+@router.callback_query(F.data == "profile_red_unfreeze")
+async def callback_profile_red_unfreeze(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    success, msg = await red_witch_unfreeze_dragon(user_id)
+    if success:
+        await callback.answer(msg, show_alert=True)
+        profile_text = await build_profile_text(user_id, callback.from_user)
+        witches = await get_user_witches(user_id)
+        has_red = witches.get("red_witch", 0) > 0
+        try:
+            await callback.message.edit_text(profile_text, reply_markup=profile_custom_name_kb(has_red_witch=has_red), parse_mode="Markdown")
+        except Exception:
+            pass
+    else:
+        await callback.answer(msg, show_alert=True)
 
 # --- Profilga Lord ismini qo'yish ---
 

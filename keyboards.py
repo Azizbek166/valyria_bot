@@ -85,12 +85,29 @@ def houses_page_kb(houses: List[Dict[str, Any]], region_key: str, page: int, use
     rows.append([InlineKeyboardButton(text="🔙 Hududlar ro'yxatiga qaytish", callback_data="house_cats_back")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
-def house_action_kb(house_id: int, is_available: bool, is_owner: bool) -> InlineKeyboardMarkup:
+def house_action_kb(
+    house_id: int,
+    is_available: bool,
+    is_owner: bool,
+    has_red_witch: bool = False,
+    spy_status: Optional[Dict[str, Any]] = None
+) -> InlineKeyboardMarkup:
     rows = []
     if is_available:
         rows.append([InlineKeyboardButton(text="👑 Ushbu xonadonni tanlash", callback_data=f"h_claim:{house_id}")])
     elif not is_owner:
         rows.append([InlineKeyboardButton(text="⚔️ Ushbu xonadonga hujum qilish", callback_data=f"attack_confirm:{house_id}")])
+        if spy_status and spy_status.get("status") == "ready":
+            rows.append([InlineKeyboardButton(text="📜 Josus hisobotini ko'rish 🔍", callback_data=f"h_spy_report:{spy_status['spy_id']}")])
+        elif spy_status and spy_status.get("status") == "pending":
+            rows.append([InlineKeyboardButton(text=f"⏳ Josus ma'lumot to'plamoqda ({spy_status.get('left_minutes', 30)} daq)", callback_data=f"h_spy_pending:{spy_status['spy_id']}")])
+        elif spy_status and spy_status.get("status") == "completed":
+            rows.append([InlineKeyboardButton(text="📜 Josus hisobotini qayta ko'rish 🔍", callback_data=f"h_spy_report:{spy_status['spy_id']}")])
+        else:
+            spy_row = [InlineKeyboardButton(text="🕵️ Josus yuborish (300 🪙)", callback_data=f"h_spy:{house_id}")]
+            if has_red_witch:
+                spy_row.append(InlineKeyboardButton(text="👩‍🦰 Qizil Jodugar (Ko'rish)", callback_data=f"h_red_spy:{house_id}"))
+            rows.append(spy_row)
         rows.append([InlineKeyboardButton(text="💍 Nikoh / Ittifoq taklif qilish", callback_data=f"alliance_choose_type:{house_id}")])
     rows.append([InlineKeyboardButton(text="🔙 Hududlarga qaytish", callback_data="house_cats_back")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -115,10 +132,15 @@ def battle_army_select_kb(
     target_house_id: int,
     army: dict,
     selected: dict,
-    has_dragons: bool = False,
+    active_dragons: list = None,
     include_dragons: bool = True,
-    has_specials: bool = False,
-    include_specials: bool = True,
+    active_spiders: list = None,
+    include_spiders: bool = True,
+    valyrian_steel: int = 0,
+    include_valyrian: bool = True,
+    strike_poison: bool = False,
+    strike_faceless: bool = False,
+    strike_shadow: bool = False,
     can_call_bannermen: bool = False,
     call_id: int = 0
 ) -> InlineKeyboardMarkup:
@@ -159,13 +181,63 @@ def battle_army_select_kb(
             InlineKeyboardButton(text="0", callback_data="bt_adj:cavalry:zero")
         ])
 
-    if has_dragons:
-        d_status = "✅ Ajdarlar qo'shilgan" if include_dragons else "❌ Ajdarlar olib tashlangan"
+    chk_avail = army.get("chakra", 0)
+    chk_sel = selected.get("chakra", 0)
+    if chk_avail > 0:
+        rows.append([InlineKeyboardButton(text=f"⚙️ Chakra: {chk_sel}/{chk_avail}", callback_data="noop")])
+        rows.append([
+            InlineKeyboardButton(text="+10", callback_data="bt_adj:chakra:+10"),
+            InlineKeyboardButton(text="+50", callback_data="bt_adj:chakra:+50"),
+            InlineKeyboardButton(text="Hammasi", callback_data="bt_adj:chakra:all"),
+            InlineKeyboardButton(text="0", callback_data="bt_adj:chakra:zero")
+        ])
+
+    gc_avail = army.get("gold_cloaks", 0)
+    gc_sel = selected.get("gold_cloaks", 0)
+    if gc_avail > 0:
+        rows.append([InlineKeyboardButton(text=f"🟡 Tilla Plash: {gc_sel}/{gc_avail}", callback_data="noop")])
+        rows.append([
+            InlineKeyboardButton(text="+5", callback_data="bt_adj:gold_cloaks:+5"),
+            InlineKeyboardButton(text="+20", callback_data="bt_adj:gold_cloaks:+20"),
+            InlineKeyboardButton(text="Hammasi", callback_data="bt_adj:gold_cloaks:all"),
+            InlineKeyboardButton(text="0", callback_data="bt_adj:gold_cloaks:zero")
+        ])
+
+    uns_avail = army.get("unsullied", 0)
+    uns_sel = selected.get("unsullied", 0)
+    if uns_avail > 0:
+        rows.append([InlineKeyboardButton(text=f"🛡 Benuqson: {uns_sel}/{uns_avail}", callback_data="noop")])
+        rows.append([
+            InlineKeyboardButton(text="+10", callback_data="bt_adj:unsullied:+10"),
+            InlineKeyboardButton(text="+50", callback_data="bt_adj:unsullied:+50"),
+            InlineKeyboardButton(text="Hammasi", callback_data="bt_adj:unsullied:all"),
+            InlineKeyboardButton(text="0", callback_data="bt_adj:unsullied:zero")
+        ])
+
+    if valyrian_steel > 0:
+        v_status = "✅ Valeriya po'lati olingan" if include_valyrian else "❌ Valeriya po'lati qoldirilgan"
+        rows.append([InlineKeyboardButton(text=f"⚔️ {v_status}", callback_data="bt_toggle:valyrian")])
+
+    dragons_cnt = len(active_dragons) if active_dragons else 0
+    if dragons_cnt > 0:
+        d_status = f"✅ Ajdarlar ({dragons_cnt} ta) qo'shilgan" if include_dragons else "❌ Ajdarlar qoldirilgan"
         rows.append([InlineKeyboardButton(text=f"🐲 {d_status}", callback_data="bt_toggle:dragons")])
 
-    if has_specials:
-        s_status = "✅ Maxsus qo'shinlar qo'shilgan" if include_specials else "❌ Maxsus qo'shinlar olib tashlangan"
-        rows.append([InlineKeyboardButton(text=f"⚡️ {s_status}", callback_data="bt_toggle:specials")])
+    spiders_cnt = len(active_spiders) if active_spiders else 0
+    if spiders_cnt > 0:
+        s_status = f"✅ O'rgamchaklar ({spiders_cnt} ta) qo'shilgan" if include_spiders else "❌ O'rgamchaklar qoldirilgan"
+        rows.append([InlineKeyboardButton(text=f"🕷 {s_status}", callback_data="bt_toggle:spiders")])
+
+    # Pastki Panel: Maxsus taktik zarbalar
+    if army.get("poison", 0) > 0:
+        p_txt = "🧪 Zahar Hujumi: ✅ FAOL (-25% mudofaa)" if strike_poison else "🧪 Zahar Hujumi: ❌ O'chiq"
+        rows.append([InlineKeyboardButton(text=p_txt, callback_data="bt_toggle:strike_poison")])
+    if army.get("faceless", 0) > 0:
+        f_txt = "🥷 Yuzsiz Qotil: ✅ FAOL (-30% mudofaa)" if strike_faceless else "🥷 Yuzsiz Qotil: ❌ O'chiq"
+        rows.append([InlineKeyboardButton(text=f_txt, callback_data="bt_toggle:strike_faceless")])
+    if army.get("shadow", 0) > 0:
+        sh_txt = "👣 Soya Qotili: ✅ FAOL (1 Ajdarni o'ldirish)" if strike_shadow else "👣 Soya Qotili: ❌ O'chiq"
+        rows.append([InlineKeyboardButton(text=sh_txt, callback_data="bt_toggle:strike_shadow")])
 
     rows.append([
         InlineKeyboardButton(text="🌟 Barcha kuch bilan (100%)", callback_data="bt_preset:all"),
@@ -352,15 +424,23 @@ def loan_repay_kb(due_amount: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🔙 Sword Bankka qaytish", callback_data="sword_bank_back")]
     ])
 
-def profile_custom_name_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
+def profile_custom_name_kb(has_red_witch: bool = False) -> InlineKeyboardMarkup:
+    rows = [
         [InlineKeyboardButton(text="✏️ Lord ismini o'zgartirish", callback_data="profile_change_name")]
-    ])
+    ]
+    if has_red_witch:
+        rows.append([InlineKeyboardButton(text="👩‍🦰 Ajdarni eritish (Qizil Jodugar)", callback_data="profile_red_unfreeze")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
-def taxes_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
+def taxes_kb(vassals: Optional[List[Dict[str, Any]]] = None) -> InlineKeyboardMarkup:
+    rows = [
         [InlineKeyboardButton(text="💰 Vassallardan soliqlarni yig'ish (24 soatda 1 marta)", callback_data="collect_all_taxes")]
-    ])
+    ]
+    if vassals:
+        for v in vassals:
+            btn_txt = f"🔓 {v['name']} (#{v['id']})ni ozod qilish"
+            rows.append([InlineKeyboardButton(text=btn_txt, callback_data=f"free_vassal:{v['id']}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def admin_panel_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[

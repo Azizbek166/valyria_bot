@@ -2,11 +2,14 @@ from aiogram import Router, F, types
 from database import (
     get_user_house, get_houses, get_house_by_id,
     choose_house, get_user, calculate_player_power,
-    get_user_army, get_user_beasts
+    get_user_army, get_user_beasts, get_user_witches,
+    send_spy, red_witch_instant_spy, get_spy_report_details,
+    get_house_spy_status
 )
 from keyboards import (
     houses_category_kb, houses_page_kb, house_action_kb
 )
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from config import REGIONS, escape_md
 import logging
 
@@ -111,6 +114,14 @@ async def callback_house_detail(callback: types.CallbackQuery):
         else:
             role_desc = f"🗡 **Bayroqdor (Bannerman) xonadoni** — Hudud Lordi: {lord_title_name}"
 
+        spy_status = None
+        has_red_witch = False
+        user_id = callback.from_user.id
+        if not is_owner and house["owner_id"]:
+            spy_status = await get_house_spy_status(user_id, house_id)
+            witches = await get_user_witches(user_id)
+            has_red_witch = witches.get("red_witch", 0) > 0
+
         if house["owner_id"]:
             owner_user = await get_user(house["owner_id"])
             raw_name = owner_user.get("custom_name") or owner_user.get("full_name") if owner_user else f"Lord #{house['owner_id']}"
@@ -135,14 +146,27 @@ async def callback_house_detail(callback: types.CallbackQuery):
 
             castle_txt = f"{house['castle_level']}-darajali Qal'a" if house.get("castle_level") else "Qal'a hali qurilmagan"
 
+            # 6. Oilalar resurslari o'yinchilarga sir tutilsin (agar egasi bo'lmasa yoki josus hisoboti bo'lmasa)
+            if is_owner or (spy_status and spy_status.get("status") == "completed"):
+                is_scouted_tag = " *(Josus hisoboti)*" if not is_owner else ""
+                power_str = f"**{power_info.get('total_active_power', 0)} ball**{is_scouted_tag}"
+                army_str = f"{owner_army.get('soldiers', 0)} askar, {owner_army.get('archers', 0)} kamonchi, {owner_army.get('cavalry', 0)} otliq"
+                dragon_str = f"{len(active_dragons)} ta"
+                gold_str = f"\n💰 **Xazina:** {owner_user.get('gold', 0)} 🪙" if not is_owner else ""
+            else:
+                power_str = "🔒 *Maxfiy (Josus yuboring)*"
+                army_str = "🔒 *Maxfiy*"
+                dragon_str = "🔒 *Maxfiy*"
+                gold_str = ""
+
             detail_text = (
                 f"🏛 **XONADON: {house_name}** (#{house['id']})\n"
                 f"━━━━━━━━━━━━━━━━━━━━\n"
                 f"👑 **Hukmdor (Lord):** [{clean_name}](tg://user?id={house['owner_id']})\n"
                 f"👤 **Lord Useri:** {user_tag} (ID: `{house['owner_id']}`)\n"
-                f"⚡️ **Harbiy qudrati:** **{power_info.get('total_active_power', 0)} ball**\n"
-                f"🗡 **Armiya:** {owner_army.get('soldiers', 0)} askar, {owner_army.get('archers', 0)} kamonchi, {owner_army.get('cavalry', 0)} otliq\n"
-                f"🐲 **Ajdarlar:** {len(active_dragons)} ta\n"
+                f"⚡️ **Harbiy qudrati:** {power_str}\n"
+                f"🗡 **Armiya:** {army_str}\n"
+                f"🐲 **Ajdarlar:** {dragon_str}{gold_str}\n"
                 f"🏰 **Qal'a:** {castle_txt}\n"
                 f"🗺 **Hudud:** **{reg_title}**\n"
                 f"🎖 **Toifasi:** {tier_desc}\n"
@@ -162,22 +186,137 @@ async def callback_house_detail(callback: types.CallbackQuery):
                 f"━━━━━━━━━━━━━━━━━━━━"
             )
 
+        action_markup = house_action_kb(house_id, is_available, is_owner, has_red_witch=has_red_witch, spy_status=spy_status)
+
         try:
             await callback.message.edit_text(
                 detail_text,
-                reply_markup=house_action_kb(house_id, is_available, is_owner),
+                reply_markup=action_markup,
                 parse_mode="Markdown"
             )
         except Exception:
             safe_text = detail_text.replace("*", "").replace("`", "").replace("_", "")
             await callback.message.edit_text(
                 safe_text,
-                reply_markup=house_action_kb(house_id, is_available, is_owner)
+                reply_markup=action_markup
             )
         await callback.answer()
     except Exception as e:
         logger.error(f"Xonadon tafsilotlarida xatolik: {e}", exc_info=True)
         await callback.answer("Ma'lumotlarni yuklashda xatolik yuz berdi.", show_alert=True)
+
+@router.callback_query(F.data.startswith("h_spy:"))
+async def callback_house_send_spy(callback: types.CallbackQuery):
+    house_id = int(callback.data.split(":")[1])
+    user_id = callback.from_user.id
+    success, msg, extra = await send_spy(user_id, house_id)
+    if success:
+        await callback.answer(msg, show_alert=True)
+        spy_status = await get_house_spy_status(user_id, house_id)
+        witches = await get_user_witches(user_id)
+        has_red = witches.get("red_witch", 0) > 0
+        try:
+            await callback.message.edit_reply_markup(
+                reply_markup=house_action_kb(house_id, False, False, has_red_witch=has_red, spy_status=spy_status)
+            )
+        except Exception:
+            pass
+    else:
+        await callback.answer(msg, show_alert=True)
+
+@router.callback_query(F.data.startswith("h_red_spy:"))
+async def callback_house_red_spy(callback: types.CallbackQuery):
+    house_id = int(callback.data.split(":")[1])
+    user_id = callback.from_user.id
+    success, msg, report = await red_witch_instant_spy(user_id, house_id)
+    if not success:
+        await callback.answer(msg, show_alert=True)
+        return
+
+    text = (
+        f"👩‍🦰 **QIZIL JODUGAR SIRLI KO'ZGU HISOBOTI** 🔮\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🏰 Nishingoh: **{report['house_name']}** (#{report['house_id']})\n"
+        f"👑 Hukmdor: **{report['owner_name']}**\n"
+        f"💰 Xazina (Oltin): **{report['gold']} 🪙**\n"
+        f"⚔️ Valeriya po'lati: **{report['valyrian_steel']} dona**\n"
+        f"⚡️ Faol jangovar kuch: **{report['total_power']} ball**\n"
+        f"🏰 Qal'a: **{report['castle_level']}-darajali**\n\n"
+        f"🛡 **Armiya:**\n"
+        f"• 🗡 Askar: {report['soldiers']} ta\n"
+        f"• 🏹 Kamonchi: {report['archers']} ta\n"
+        f"• 🐎 Otliq: {report['cavalry']} ta\n"
+        f"• ⚙️ Chakra: {report['chakra']} ta\n"
+        f"• 🟡 Tilla plash: {report['gold_cloaks']} ta\n"
+        f"• 🛡 Benuqson: {report['unsullied']} ta\n"
+        f"• 🥷 Yuzsiz: {report['faceless']} ta\n"
+        f"• 👣 Soya: {report['shadow']} ta\n"
+        f"• 🧪 Zahar: {report['poison']} ta\n\n"
+        f"🐲 Ajdarlar: **{report['dragons_count']} ta** (Faol: {report['dragons_active']} ta)\n"
+        f"🕷 O'rgamchaklar: **{report['spiders_count']} ta**"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⚔️ Ushbu xonadonga hujum qilish", callback_data=f"attack_confirm:{house_id}")],
+        [InlineKeyboardButton(text="🔙 Xonadonga qaytish", callback_data=f"h_detail:{house_id}")]
+    ])
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("h_spy_report:"))
+async def callback_house_spy_report(callback: types.CallbackQuery):
+    spy_id = int(callback.data.split(":")[1])
+    user_id = callback.from_user.id
+    report = await get_spy_report_details(spy_id, user_id)
+    if not report or report.get("status") in ["intercepted", "abandoned"]:
+        await callback.answer("Josus hisoboti mavjud emas yoki to'sib qolingan!", show_alert=True)
+        return
+
+    if report.get("status") == "pending":
+        left = max(1, report.get("left_seconds", 0) // 60)
+        await callback.answer(f"⏳ Josus hali ma'lumot to'plamoqda! Qolgan vaqt: {left} daqiqa.", show_alert=True)
+        return
+
+    text = (
+        f"🕵️ **JOSUSLIK HISOBOTI (MAXFIY HUJJAT)** 📜\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🏰 Nishingoh: **{report['house_name']}** (#{report['house_id']})\n"
+        f"👑 Hukmdor: **{report['owner_name']}**\n"
+        f"💰 Xazina (Oltin): **{report['gold']} 🪙**\n"
+        f"⚔️ Valeriya po'lati: **{report['valyrian_steel']} dona**\n"
+        f"⚡️ Faol jangovar kuch: **{report['total_power']} ball**\n"
+        f"🏰 Qal'a: **{report['castle_level']}-darajali**\n\n"
+        f"🛡 **Armiya tarkibi:**\n"
+        f"• 🗡 Askar: {report['soldiers']} ta\n"
+        f"• 🏹 Kamonchi: {report['archers']} ta\n"
+        f"• 🐎 Otliq: {report['cavalry']} ta\n"
+        f"• ⚙️ Chakra: {report['chakra']} ta\n"
+        f"• 🟡 Tilla plash: {report['gold_cloaks']} ta\n"
+        f"• 🛡 Benuqson: {report['unsullied']} ta\n"
+        f"• 🥷 Yuzsiz: {report['faceless']} ta\n"
+        f"• 👣 Soya: {report['shadow']} ta\n"
+        f"• 🧪 Zahar: {report['poison']} ta\n\n"
+        f"🐲 Ajdarlar: **{report['dragons_count']} ta** (Faol: {report['dragons_active']} ta)\n"
+        f"🕷 Muz o'rgamchaklar: **{report['spiders_count']} ta**"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⚔️ Ushbu xonadonga hujum qilish", callback_data=f"attack_confirm:{report['house_id']}")],
+        [InlineKeyboardButton(text="🔙 Xonadonga qaytish", callback_data=f"h_detail:{report['house_id']}")]
+    ])
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("h_spy_pending:"))
+async def callback_house_spy_pending(callback: types.CallbackQuery):
+    spy_id = int(callback.data.split(":")[1])
+    user_id = callback.from_user.id
+    report = await get_spy_report_details(spy_id, user_id)
+    if report and report.get("status") == "pending":
+        left = max(1, report.get("left_seconds", 0) // 60)
+        await callback.answer(f"⏳ Josus dushman qal'asida ma'lumot to'plamoqda. Hisobotga {left} daqiqa qoldi.", show_alert=True)
+    elif report and report.get("status") == "completed":
+        await callback.answer("Josus hisoboti tayyor! Ko'rish uchun tugmani bosing.", show_alert=True)
+    else:
+        await callback.answer("Josus faol emas yoki xatolik yuz berdi.", show_alert=True)
 
 @router.callback_query(F.data.startswith("h_claim:"))
 async def callback_house_claim(callback: types.CallbackQuery):

@@ -33,33 +33,36 @@ def format_army_selection_text(
     selected: dict,
     active_dragons: list,
     include_dragons: bool,
-    has_specials: bool,
-    include_specials: bool,
-    valyrian_steel: int
+    active_spiders: list,
+    include_spiders: bool,
+    valyrian_steel: int,
+    include_valyrian: bool,
+    strike_poison: bool,
+    strike_faceless: bool,
+    strike_shadow: bool
 ) -> tuple[str, int]:
-    chakra_mult = 2 if valyrian_steel >= 1 else 1
+    effective_valyrian = valyrian_steel if include_valyrian else 0
+    chakra_mult = 2 if effective_valyrian >= 1 else 1
 
     power = (
         selected.get("soldiers", 0) * UNITS["soldier"]["atk"] +
         selected.get("archers", 0) * UNITS.get("archer", {}).get("atk", 3) +
-        selected.get("cavalry", 0) * UNITS.get("cavalry", {}).get("atk", 6)
+        selected.get("cavalry", 0) * UNITS.get("cavalry", {}).get("atk", 6) +
+        selected.get("chakra", 0) * UNITS["chakra"]["atk"] * chakra_mult +
+        selected.get("gold_cloaks", 0) * UNITS["gold_cloak"]["atk"] +
+        selected.get("unsullied", 0) * UNITS["unsullied"]["atk"] +
+        (effective_valyrian * 500)
     )
-
-    if include_specials:
-        power += (
-            selected.get("chakra", 0) * UNITS["chakra"]["atk"] * chakra_mult +
-            selected.get("gold_cloaks", 0) * UNITS["gold_cloak"]["atk"] +
-            selected.get("unsullied", 0) * UNITS["unsullied"]["atk"] +
-            selected.get("faceless", 0) * UNITS["faceless"]["atk"] +
-            selected.get("shadow", 0) * UNITS["shadow"]["atk"] +
-            selected.get("poison", 0) * UNITS["poison"]["atk"] +
-            (valyrian_steel * 500)
-        )
 
     dragons_power = 0
     if include_dragons and active_dragons:
         dragons_power = sum(d.get("power", 500) for d in active_dragons)
         power += dragons_power
+
+    spiders_power = 0
+    if include_spiders and active_spiders:
+        spiders_power = sum(s.get("power", 500) for s in active_spiders)
+        power += spiders_power
 
     target_reg = REGIONS.get(target_house.get("region", ""), {})
 
@@ -68,17 +71,39 @@ def format_army_selection_text(
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"🏰 Nishingoh: **{target_house['name']}** (#{target_house['id']})\n"
         f"🌍 Hudud: **{target_reg.get('name', '')}**\n\n"
-        f"📋 **Jangga yuborilayotgan qo'shin:**\n"
+        f"📋 **Jangga yuborilayotgan kuchlar:**\n"
         f"• 🗡 Oddiy askar: **{selected.get('soldiers', 0)}** ta (mavjud: {army.get('soldiers', 0)})\n"
-        f"• 🏹 Kamonchi: **{selected.get('archers', 0)}** ta (mavjud: {army.get('archers', 0)})\n"
-        f"• 🐎 Otliq: **{selected.get('cavalry', 0)}** ta (mavjud: {army.get('cavalry', 0)})\n"
     )
+    if army.get("archers", 0) > 0:
+        text += f"• 🏹 Kamonchi: **{selected.get('archers', 0)}** ta (mavjud: {army.get('archers', 0)})\n"
+    if army.get("cavalry", 0) > 0:
+        text += f"• 🐎 Otliq: **{selected.get('cavalry', 0)}** ta (mavjud: {army.get('cavalry', 0)})\n"
+    if army.get("chakra", 0) > 0:
+        text += f"• ⚙️ Chakra: **{selected.get('chakra', 0)}** ta (mavjud: {army.get('chakra', 0)})\n"
+    if army.get("gold_cloaks", 0) > 0:
+        text += f"• 🟡 Tilla plash: **{selected.get('gold_cloaks', 0)}** ta (mavjud: {army.get('gold_cloaks', 0)})\n"
+    if army.get("unsullied", 0) > 0:
+        text += f"• 🛡 Benuqson: **{selected.get('unsullied', 0)}** ta (mavjud: {army.get('unsullied', 0)})\n"
+    if valyrian_steel > 0:
+        v_tag = f"✅ Jangga olingan (+{effective_valyrian * 500} ball, Chakra x{chakra_mult})" if include_valyrian else "❌ Qal'ada qoldirilgan"
+        text += f"• ⚔️ Valeriya po'lati: {v_tag}\n"
     if active_dragons:
-        d_status = f"**{len(active_dragons)} ta ajdar** (+{dragons_power} ball)" if include_dragons else "❌ Olib tashlangan"
-        text += f"• 🐲 Ajdarlar: {d_status}\n"
-    if has_specials:
-        s_status = "✅ Qo'shilgan" if include_specials else "❌ Olib tashlangan"
-        text += f"• ⚡️ Maxsus kuchlar: {s_status}\n"
+        d_tag = f"✅ **{len(active_dragons)} ta ajdar** (+{dragons_power} ball)" if include_dragons else "❌ Qal'ada qoldirilgan"
+        text += f"• 🐲 Ajdarlar: {d_tag}\n"
+    if active_spiders:
+        s_tag = f"✅ **{len(active_spiders)} ta o'rgamchak** (+{spiders_power} ball)" if include_spiders else "❌ Qal'ada qoldirilgan"
+        text += f"• 🕷 O'rgamchaklar: {s_tag}\n"
+
+    strikes = []
+    if strike_poison:
+        strikes.append("🧪 **Zahar Hujumi:** Dushman mudofaasini 25% pasaytiradi")
+    if strike_faceless:
+        strikes.append("🥷 **Yuzsiz Qotil:** Dushman mudofaasini 30% buzib o'tadi")
+    if strike_shadow:
+        strikes.append("👣 **Soya Qotili:** Dushmanning 1 ta ajdarini o'ldiradi!")
+
+    if strikes:
+        text += "\n💥 **Pastki Panel Taktik Zarbalari:**\n" + "\n".join([f"• {st}" for st in strikes]) + "\n"
 
     text += (
         f"\n⚡️ **Umumiy zarba quvvati:** **{power} ball**\n"
@@ -86,6 +111,67 @@ def format_army_selection_text(
         f"⚠️ *Eslatma: Faqat jangga yuborilgan qo'shinlar talafot ko'radi. Qal'angizda qolgan kuchlaringiz xavfsiz saqlanadi!*"
     )
     return text, power
+
+async def refresh_army_selection_ui(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    user_id = callback.from_user.id
+    target_house = await get_house_by_id(data["target_house_id"])
+    user_house = await get_user_house(user_id)
+    army = await get_user_army(user_id)
+    beasts = await get_user_beasts(user_id)
+    now = int(time.time())
+    active_dragons = [dict(b) for b in beasts if b["beast_type"] == "dragon" and b["frozen_until"] <= now]
+    active_spiders = [dict(b) for b in beasts if b["beast_type"] == "spider" and b["frozen_until"] <= now]
+    user_row = await get_user(user_id)
+    valyrian_steel = user_row.get("valyrian_steel", 0) if user_row else 0
+
+    selected = data.get("selected_troops", {})
+    include_dragons = data.get("include_dragons", True)
+    include_spiders = data.get("include_spiders", True)
+    include_valyrian = data.get("include_valyrian", True)
+    strike_poison = data.get("strike_poison", False)
+    strike_faceless = data.get("strike_faceless", False)
+    strike_shadow = data.get("strike_shadow", False)
+    can_call_bannermen = data.get("can_call_bannermen", False)
+    call_id = data.get("call_id", 0)
+
+    text, power = format_army_selection_text(
+        target_house=target_house,
+        user_house=user_house,
+        army=army,
+        selected=selected,
+        active_dragons=active_dragons,
+        include_dragons=include_dragons,
+        active_spiders=active_spiders,
+        include_spiders=include_spiders,
+        valyrian_steel=valyrian_steel,
+        include_valyrian=include_valyrian,
+        strike_poison=strike_poison,
+        strike_faceless=strike_faceless,
+        strike_shadow=strike_shadow
+    )
+
+    kb = battle_army_select_kb(
+        target_house_id=data["target_house_id"],
+        army=army,
+        selected=selected,
+        active_dragons=active_dragons,
+        include_dragons=include_dragons,
+        active_spiders=active_spiders,
+        include_spiders=include_spiders,
+        valyrian_steel=valyrian_steel,
+        include_valyrian=include_valyrian,
+        strike_poison=strike_poison,
+        strike_faceless=strike_faceless,
+        strike_shadow=strike_shadow,
+        can_call_bannermen=can_call_bannermen,
+        call_id=call_id
+    )
+
+    try:
+        await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+    except Exception:
+        pass
 
 @router.message(F.text == "⚔️ Janglar")
 async def show_battles_menu(message: types.Message, state: FSMContext):
@@ -190,17 +276,17 @@ async def callback_attack_confirm(callback: types.CallbackQuery, state: FSMConte
 
     power_info = await calculate_player_power(user_id)
     if power_info["total_active_power"] <= 0:
-        await callback.answer("Sizda jangga kiradigan askar yoki ajdar yo'q!", show_alert=True)
+        await callback.answer("Sizda jangga kiradigan askar yoki maxluq yo'q!", show_alert=True)
         return
 
     army = await get_user_army(user_id)
     beasts = await get_user_beasts(user_id)
     now = int(time.time())
     active_dragons = [dict(b) for b in beasts if b["beast_type"] == "dragon" and b["frozen_until"] <= now]
+    active_spiders = [dict(b) for b in beasts if b["beast_type"] == "spider" and b["frozen_until"] <= now]
+    user_row = await get_user(user_id)
+    valyrian_steel = user_row.get("valyrian_steel", 0) if user_row else 0
 
-    has_specials = any(army.get(k, 0) > 0 for k in ["chakra", "gold_cloaks", "unsullied", "faceless", "shadow", "poison"])
-
-    # Standart holatda barcha mavjud qo'shinlarni tanlaymiz (foydalanuvchi xohlasa o'zgartiradi)
     selected_troops = {
         "soldiers": army.get("soldiers", 0),
         "archers": army.get("archers", 0),
@@ -208,10 +294,11 @@ async def callback_attack_confirm(callback: types.CallbackQuery, state: FSMConte
         "chakra": army.get("chakra", 0),
         "gold_cloaks": army.get("gold_cloaks", 0),
         "unsullied": army.get("unsullied", 0),
-        "faceless": army.get("faceless", 0),
-        "shadow": army.get("shadow", 0),
-        "poison": army.get("poison", 0),
-        "dragon_ids": [d["id"] for d in active_dragons]
+        "faceless": 0,
+        "shadow": 0,
+        "poison": 0,
+        "dragon_ids": [d["id"] for d in active_dragons],
+        "spider_ids": [s["id"] for s in active_spiders]
     }
 
     active_cta = await get_active_call_to_arms(house_id)
@@ -229,7 +316,11 @@ async def callback_attack_confirm(callback: types.CallbackQuery, state: FSMConte
         call_id=call_id,
         selected_troops=selected_troops,
         include_dragons=True,
-        include_specials=True,
+        include_spiders=True,
+        include_valyrian=True,
+        strike_poison=False,
+        strike_faceless=False,
+        strike_shadow=False,
         can_call_bannermen=can_call_bannermen
     )
 
@@ -240,19 +331,28 @@ async def callback_attack_confirm(callback: types.CallbackQuery, state: FSMConte
         selected=selected_troops,
         active_dragons=active_dragons,
         include_dragons=True,
-        has_specials=has_specials,
-        include_specials=True,
-        valyrian_steel=power_info.get("valyrian_steel", 0)
+        active_spiders=active_spiders,
+        include_spiders=True,
+        valyrian_steel=valyrian_steel,
+        include_valyrian=True,
+        strike_poison=False,
+        strike_faceless=False,
+        strike_shadow=False
     )
 
     kb = battle_army_select_kb(
         target_house_id=house_id,
         army=army,
         selected=selected_troops,
-        has_dragons=len(active_dragons) > 0,
+        active_dragons=active_dragons,
         include_dragons=True,
-        has_specials=has_specials,
-        include_specials=True,
+        active_spiders=active_spiders,
+        include_spiders=True,
+        valyrian_steel=valyrian_steel,
+        include_valyrian=True,
+        strike_poison=False,
+        strike_faceless=False,
+        strike_shadow=False,
         can_call_bannermen=can_call_bannermen,
         call_id=call_id
     )
@@ -283,139 +383,43 @@ async def callback_battle_adjust_troops(callback: types.CallbackQuery, state: FS
 
     selected[unit_type] = current
     await state.update_data(selected_troops=selected)
-
-    target_house = await get_house_by_id(data["target_house_id"])
-    user_house = await get_user_house(user_id)
-    beasts = await get_user_beasts(user_id)
-    now = int(time.time())
-    active_dragons = [dict(b) for b in beasts if b["beast_type"] == "dragon" and b["frozen_until"] <= now]
-    user_row = await get_user(user_id)
-    valyrian_steel = user_row.get("valyrian_steel", 0) if user_row else 0
-    has_specials = any(army.get(k, 0) > 0 for k in ["chakra", "gold_cloaks", "unsullied", "faceless", "shadow", "poison"])
-
-    text, power = format_army_selection_text(
-        target_house=target_house,
-        user_house=user_house,
-        army=army,
-        selected=selected,
-        active_dragons=active_dragons,
-        include_dragons=data.get("include_dragons", True),
-        has_specials=has_specials,
-        include_specials=data.get("include_specials", True),
-        valyrian_steel=valyrian_steel
-    )
-
-    kb = battle_army_select_kb(
-        target_house_id=data["target_house_id"],
-        army=army,
-        selected=selected,
-        has_dragons=len(active_dragons) > 0,
-        include_dragons=data.get("include_dragons", True),
-        has_specials=has_specials,
-        include_specials=data.get("include_specials", True),
-        can_call_bannermen=data.get("can_call_bannermen", False),
-        call_id=data.get("call_id", 0)
-    )
-
-    try:
-        await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
-    except Exception:
-        pass
+    await refresh_army_selection_ui(callback, state)
     await callback.answer(f"{unit_type.capitalize()}: {current} ta")
 
-@router.callback_query(F.data == "bt_toggle:dragons", BattleState.selecting_army)
-async def callback_battle_toggle_dragons(callback: types.CallbackQuery, state: FSMContext):
+@router.callback_query(F.data.startswith("bt_toggle:"), BattleState.selecting_army)
+async def callback_battle_toggle(callback: types.CallbackQuery, state: FSMContext):
+    toggle_key = callback.data.split(":")[1]
     data = await state.get_data()
-    inc_dragons = not data.get("include_dragons", True)
-    await state.update_data(include_dragons=inc_dragons)
 
-    user_id = callback.from_user.id
-    target_house = await get_house_by_id(data["target_house_id"])
-    user_house = await get_user_house(user_id)
-    army = await get_user_army(user_id)
-    beasts = await get_user_beasts(user_id)
-    now = int(time.time())
-    active_dragons = [dict(b) for b in beasts if b["beast_type"] == "dragon" and b["frozen_until"] <= now]
-    user_row = await get_user(user_id)
-    valyrian_steel = user_row.get("valyrian_steel", 0) if user_row else 0
-    has_specials = any(army.get(k, 0) > 0 for k in ["chakra", "gold_cloaks", "unsullied", "faceless", "shadow", "poison"])
+    if toggle_key == "dragons":
+        val = not data.get("include_dragons", True)
+        await state.update_data(include_dragons=val)
+        ans = "Ajdarlar holati o'zgartirildi!"
+    elif toggle_key == "spiders":
+        val = not data.get("include_spiders", True)
+        await state.update_data(include_spiders=val)
+        ans = "O'rgamchaklar holati o'zgartirildi!"
+    elif toggle_key == "valyrian":
+        val = not data.get("include_valyrian", True)
+        await state.update_data(include_valyrian=val)
+        ans = "Valeriya po'lati holati o'zgartirildi!"
+    elif toggle_key == "strike_poison":
+        val = not data.get("strike_poison", False)
+        await state.update_data(strike_poison=val)
+        ans = "Zahar hujumi yoqildi! (-25% mudofaa)" if val else "Zahar hujumi o'chirildi!"
+    elif toggle_key == "strike_faceless":
+        val = not data.get("strike_faceless", False)
+        await state.update_data(strike_faceless=val)
+        ans = "Yuzsiz qotil hujumi yoqildi! (-30% mudofaa)" if val else "Yuzsiz qotil hujumi o'chirildi!"
+    elif toggle_key == "strike_shadow":
+        val = not data.get("strike_shadow", False)
+        await state.update_data(strike_shadow=val)
+        ans = "Soya qotili hujumi (1 Ajdarni o'ldirish) yoqildi!" if val else "Soya qotili hujumi o'chirildi!"
+    else:
+        ans = "Yangilandi"
 
-    text, power = format_army_selection_text(
-        target_house=target_house,
-        user_house=user_house,
-        army=army,
-        selected=data.get("selected_troops", {}),
-        active_dragons=active_dragons,
-        include_dragons=inc_dragons,
-        has_specials=has_specials,
-        include_specials=data.get("include_specials", True),
-        valyrian_steel=valyrian_steel
-    )
-
-    kb = battle_army_select_kb(
-        target_house_id=data["target_house_id"],
-        army=army,
-        selected=data.get("selected_troops", {}),
-        has_dragons=len(active_dragons) > 0,
-        include_dragons=inc_dragons,
-        has_specials=has_specials,
-        include_specials=data.get("include_specials", True),
-        can_call_bannermen=data.get("can_call_bannermen", False),
-        call_id=data.get("call_id", 0)
-    )
-
-    try:
-        await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
-    except Exception:
-        pass
-    await callback.answer("Ajdarlar holati yangilandi!")
-
-@router.callback_query(F.data == "bt_toggle:specials", BattleState.selecting_army)
-async def callback_battle_toggle_specials(callback: types.CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    inc_specials = not data.get("include_specials", True)
-    await state.update_data(include_specials=inc_specials)
-
-    user_id = callback.from_user.id
-    target_house = await get_house_by_id(data["target_house_id"])
-    user_house = await get_user_house(user_id)
-    army = await get_user_army(user_id)
-    beasts = await get_user_beasts(user_id)
-    now = int(time.time())
-    active_dragons = [dict(b) for b in beasts if b["beast_type"] == "dragon" and b["frozen_until"] <= now]
-    user_row = await get_user(user_id)
-    valyrian_steel = user_row.get("valyrian_steel", 0) if user_row else 0
-    has_specials = any(army.get(k, 0) > 0 for k in ["chakra", "gold_cloaks", "unsullied", "faceless", "shadow", "poison"])
-
-    text, power = format_army_selection_text(
-        target_house=target_house,
-        user_house=user_house,
-        army=army,
-        selected=data.get("selected_troops", {}),
-        active_dragons=active_dragons,
-        include_dragons=data.get("include_dragons", True),
-        has_specials=has_specials,
-        include_specials=inc_specials,
-        valyrian_steel=valyrian_steel
-    )
-
-    kb = battle_army_select_kb(
-        target_house_id=data["target_house_id"],
-        army=army,
-        selected=data.get("selected_troops", {}),
-        has_dragons=len(active_dragons) > 0,
-        include_dragons=data.get("include_dragons", True),
-        has_specials=has_specials,
-        include_specials=inc_specials,
-        can_call_bannermen=data.get("can_call_bannermen", False),
-        call_id=data.get("call_id", 0)
-    )
-
-    try:
-        await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
-    except Exception:
-        pass
-    await callback.answer("Maxsus qo'shinlar holati yangilandi!")
+    await refresh_army_selection_ui(callback, state)
+    await callback.answer(ans)
 
 @router.callback_query(F.data == "bt_preset:all", BattleState.selecting_army)
 async def callback_battle_preset_all(callback: types.CallbackQuery, state: FSMContext):
@@ -425,6 +429,7 @@ async def callback_battle_preset_all(callback: types.CallbackQuery, state: FSMCo
     beasts = await get_user_beasts(user_id)
     now = int(time.time())
     active_dragons = [dict(b) for b in beasts if b["beast_type"] == "dragon" and b["frozen_until"] <= now]
+    active_spiders = [dict(b) for b in beasts if b["beast_type"] == "spider" and b["frozen_until"] <= now]
 
     selected = {
         "soldiers": army.get("soldiers", 0),
@@ -433,100 +438,43 @@ async def callback_battle_preset_all(callback: types.CallbackQuery, state: FSMCo
         "chakra": army.get("chakra", 0),
         "gold_cloaks": army.get("gold_cloaks", 0),
         "unsullied": army.get("unsullied", 0),
-        "faceless": army.get("faceless", 0),
-        "shadow": army.get("shadow", 0),
-        "poison": army.get("poison", 0),
-        "dragon_ids": [d["id"] for d in active_dragons]
+        "faceless": 0,
+        "shadow": 0,
+        "poison": 0,
+        "dragon_ids": [d["id"] for d in active_dragons],
+        "spider_ids": [s["id"] for s in active_spiders]
     }
-    await state.update_data(selected_troops=selected, include_dragons=True, include_specials=True)
-
-    target_house = await get_house_by_id(data["target_house_id"])
-    user_house = await get_user_house(user_id)
-    user_row = await get_user(user_id)
-    valyrian_steel = user_row.get("valyrian_steel", 0) if user_row else 0
-    has_specials = any(army.get(k, 0) > 0 for k in ["chakra", "gold_cloaks", "unsullied", "faceless", "shadow", "poison"])
-
-    text, power = format_army_selection_text(
-        target_house=target_house,
-        user_house=user_house,
-        army=army,
-        selected=selected,
-        active_dragons=active_dragons,
+    await state.update_data(
+        selected_troops=selected,
         include_dragons=True,
-        has_specials=has_specials,
-        include_specials=True,
-        valyrian_steel=valyrian_steel
+        include_spiders=True,
+        include_valyrian=True,
+        strike_poison=(army.get("poison", 0) > 0),
+        strike_faceless=(army.get("faceless", 0) > 0),
+        strike_shadow=(army.get("shadow", 0) > 0)
     )
-
-    kb = battle_army_select_kb(
-        target_house_id=data["target_house_id"],
-        army=army,
-        selected=selected,
-        has_dragons=len(active_dragons) > 0,
-        include_dragons=True,
-        has_specials=has_specials,
-        include_specials=True,
-        can_call_bannermen=data.get("can_call_bannermen", False),
-        call_id=data.get("call_id", 0)
-    )
-
-    try:
-        await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
-    except Exception:
-        pass
+    await refresh_army_selection_ui(callback, state)
     await callback.answer("Barcha mavjud kuchlar tanlandi!")
 
 @router.callback_query(F.data == "bt_preset:zero", BattleState.selecting_army)
 async def callback_battle_preset_zero(callback: types.CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    user_id = callback.from_user.id
-    army = await get_user_army(user_id)
-    beasts = await get_user_beasts(user_id)
-    now = int(time.time())
-    active_dragons = [dict(b) for b in beasts if b["beast_type"] == "dragon" and b["frozen_until"] <= now]
-
     selected = {
         "soldiers": 0, "archers": 0, "cavalry": 0,
         "chakra": 0, "gold_cloaks": 0, "unsullied": 0,
         "faceless": 0, "shadow": 0, "poison": 0,
-        "dragon_ids": []
+        "dragon_ids": [],
+        "spider_ids": []
     }
-    await state.update_data(selected_troops=selected, include_dragons=False, include_specials=False)
-
-    target_house = await get_house_by_id(data["target_house_id"])
-    user_house = await get_user_house(user_id)
-    user_row = await get_user(user_id)
-    valyrian_steel = user_row.get("valyrian_steel", 0) if user_row else 0
-    has_specials = any(army.get(k, 0) > 0 for k in ["chakra", "gold_cloaks", "unsullied", "faceless", "shadow", "poison"])
-
-    text, power = format_army_selection_text(
-        target_house=target_house,
-        user_house=user_house,
-        army=army,
-        selected=selected,
-        active_dragons=active_dragons,
+    await state.update_data(
+        selected_troops=selected,
         include_dragons=False,
-        has_specials=has_specials,
-        include_specials=False,
-        valyrian_steel=valyrian_steel
+        include_spiders=False,
+        include_valyrian=False,
+        strike_poison=False,
+        strike_faceless=False,
+        strike_shadow=False
     )
-
-    kb = battle_army_select_kb(
-        target_house_id=data["target_house_id"],
-        army=army,
-        selected=selected,
-        has_dragons=len(active_dragons) > 0,
-        include_dragons=False,
-        has_specials=has_specials,
-        include_specials=False,
-        can_call_bannermen=data.get("can_call_bannermen", False),
-        call_id=data.get("call_id", 0)
-    )
-
-    try:
-        await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
-    except Exception:
-        pass
+    await refresh_army_selection_ui(callback, state)
     await callback.answer("Tanlov tozalandi!")
 
 @router.callback_query(F.data == "bt_custom_input", BattleState.selecting_army)
@@ -534,9 +482,10 @@ async def callback_battle_custom_input(callback: types.CallbackQuery, state: FSM
     await state.set_state(BattleState.waiting_for_custom_input)
     prompt = (
         "📝 **QO'SHIN MIQDORINI QO'LDA KIRITISH**\n\n"
-        "Jangga yubormoqchi bo'lgan **Oddiy askar**, **Kamonchi** va **Otliqlar** sonini bitta qatorda bo'sh joy bilan yozing:\n\n"
-        "Masalan: `50 15 5`\n"
-        "*(50 ta askar, 15 ta kamonchi, 5 ta otliq)*"
+        "Jangga yubormoqchi bo'lgan askarlarni ketma-ket bo'sh joy bilan yozing:\n"
+        "`Oddiy_Askar Kamonchi Otliq Chakra Tilla_Plash Benuqson`\n\n"
+        "Masalan: `50 15 5 20 10 30`\n"
+        "*(50 ta askar, 15 ta kamonchi, 5 ta otliq, 20 chakra, 10 tilla plash, 30 benuqson)*"
     )
     await callback.message.answer(prompt, parse_mode="Markdown")
     await callback.answer()
@@ -552,8 +501,11 @@ async def handle_custom_troop_input(message: types.Message, state: FSMContext):
         s_cnt = int(parts[0]) if len(parts) > 0 else 0
         a_cnt = int(parts[1]) if len(parts) > 1 else 0
         c_cnt = int(parts[2]) if len(parts) > 2 else 0
+        chk_cnt = int(parts[3]) if len(parts) > 3 else 0
+        gc_cnt = int(parts[4]) if len(parts) > 4 else 0
+        uns_cnt = int(parts[5]) if len(parts) > 5 else 0
     except ValueError:
-        await message.answer("❌ Noto'g'ri format! Faqat sonlar yozing, masalan: `30 10 5`")
+        await message.answer("❌ Noto'g'ri format! Faqat sonlar yozing, masalan: `30 10 5 0 0 0`")
         return
 
     data = await state.get_data()
@@ -562,6 +514,9 @@ async def handle_custom_troop_input(message: types.Message, state: FSMContext):
     selected["soldiers"] = max(0, min(army.get("soldiers", 0), s_cnt))
     selected["archers"] = max(0, min(army.get("archers", 0), a_cnt))
     selected["cavalry"] = max(0, min(army.get("cavalry", 0), c_cnt))
+    selected["chakra"] = max(0, min(army.get("chakra", 0), chk_cnt))
+    selected["gold_cloaks"] = max(0, min(army.get("gold_cloaks", 0), gc_cnt))
+    selected["unsullied"] = max(0, min(army.get("unsullied", 0), uns_cnt))
 
     await state.set_state(BattleState.selecting_army)
     await state.update_data(selected_troops=selected)
@@ -571,9 +526,9 @@ async def handle_custom_troop_input(message: types.Message, state: FSMContext):
     beasts = await get_user_beasts(user_id)
     now = int(time.time())
     active_dragons = [dict(b) for b in beasts if b["beast_type"] == "dragon" and b["frozen_until"] <= now]
+    active_spiders = [dict(b) for b in beasts if b["beast_type"] == "spider" and b["frozen_until"] <= now]
     user_row = await get_user(user_id)
     valyrian_steel = user_row.get("valyrian_steel", 0) if user_row else 0
-    has_specials = any(army.get(k, 0) > 0 for k in ["chakra", "gold_cloaks", "unsullied", "faceless", "shadow", "poison"])
 
     res_text, power = format_army_selection_text(
         target_house=target_house,
@@ -582,19 +537,28 @@ async def handle_custom_troop_input(message: types.Message, state: FSMContext):
         selected=selected,
         active_dragons=active_dragons,
         include_dragons=data.get("include_dragons", True),
-        has_specials=has_specials,
-        include_specials=data.get("include_specials", True),
-        valyrian_steel=valyrian_steel
+        active_spiders=active_spiders,
+        include_spiders=data.get("include_spiders", True),
+        valyrian_steel=valyrian_steel,
+        include_valyrian=data.get("include_valyrian", True),
+        strike_poison=data.get("strike_poison", False),
+        strike_faceless=data.get("strike_faceless", False),
+        strike_shadow=data.get("strike_shadow", False)
     )
 
     kb = battle_army_select_kb(
         target_house_id=data["target_house_id"],
         army=army,
         selected=selected,
-        has_dragons=len(active_dragons) > 0,
+        active_dragons=active_dragons,
         include_dragons=data.get("include_dragons", True),
-        has_specials=has_specials,
-        include_specials=data.get("include_specials", True),
+        active_spiders=active_spiders,
+        include_spiders=data.get("include_spiders", True),
+        valyrian_steel=valyrian_steel,
+        include_valyrian=data.get("include_valyrian", True),
+        strike_poison=data.get("strike_poison", False),
+        strike_faceless=data.get("strike_faceless", False),
+        strike_shadow=data.get("strike_shadow", False),
         can_call_bannermen=data.get("can_call_bannermen", False),
         call_id=data.get("call_id", 0)
     )
@@ -611,19 +575,25 @@ async def callback_battle_confirm_march(callback: types.CallbackQuery, state: FS
     data = await state.get_data()
     selected_troops = data.get("selected_troops", {})
 
-    # Ajdarlar va maxsus kuchlar filtri
     beasts = await get_user_beasts(user_id)
     now = int(time.time())
     active_dragons = [b["id"] for b in beasts if b["beast_type"] == "dragon" and b["frozen_until"] <= now]
+    active_spiders = [b["id"] for b in beasts if b["beast_type"] == "spider" and b["frozen_until"] <= now]
 
     if not data.get("include_dragons", True):
         selected_troops["dragon_ids"] = []
     else:
         selected_troops["dragon_ids"] = active_dragons
 
-    if not data.get("include_specials", True):
-        for k in ["chakra", "gold_cloaks", "unsullied", "faceless", "shadow", "poison"]:
-            selected_troops[k] = 0
+    if not data.get("include_spiders", True):
+        selected_troops["spider_ids"] = []
+    else:
+        selected_troops["spider_ids"] = active_spiders
+
+    selected_troops["include_valyrian"] = data.get("include_valyrian", True)
+    selected_troops["poison_strike"] = data.get("strike_poison", False)
+    selected_troops["faceless_strike"] = data.get("strike_faceless", False)
+    selected_troops["shadow_strike"] = data.get("strike_shadow", False)
 
     success, msg, battle_id = await start_house_attack(user_id, target_house_id, selected_troops, call_id)
     if not success:
@@ -643,7 +613,11 @@ async def callback_battle_confirm_march(callback: types.CallbackQuery, state: FS
         f"🗡 Yuborilgan askarlar: **{selected_troops.get('soldiers', 0)}** ta\n"
         f"🏹 Kamonchilar: **{selected_troops.get('archers', 0)}** ta\n"
         f"🐎 Otliqlar: **{selected_troops.get('cavalry', 0)}** ta\n"
-        f"🐲 Ajdarlar: **{len(selected_troops.get('dragon_ids', []))}** ta\n\n"
+        f"⚙️ Chakra: **{selected_troops.get('chakra', 0)}** ta\n"
+        f"🟡 Tilla plash: **{selected_troops.get('gold_cloaks', 0)}** ta\n"
+        f"🛡 Benuqson: **{selected_troops.get('unsullied', 0)}** ta\n"
+        f"🐲 Ajdarlar: **{len(selected_troops.get('dragon_ids', []))}** ta\n"
+        f"🕷 O'rgamchaklar: **{len(selected_troops.get('spider_ids', []))}** ta\n\n"
         f"🛡 *Qo'shinlaringiz dushman qal'asi tomon yurish boshladi. 8 daqiqa o'tgach natijani qabul qilib olishingiz mumkin!*"
     )
 
@@ -664,6 +638,18 @@ async def callback_battle_confirm_march(callback: types.CallbackQuery, state: FS
                 f"Mudofaani mustahkamlang yoki ittifoqchilaringizni yordamga chorlang!"
             )
             await callback.bot.send_message(target_house["owner_id"], defender_msg, parse_mode="Markdown")
+        except Exception:
+            pass
+
+    # 1. Lordlar o'z vassallarini himoya qilishi: Overlordga zudlik bilan xabar yuborish!
+    if target_house and target_house.get("overlord_id") and target_house["overlord_id"] != user_id:
+        try:
+            overlord_msg = (
+                f"🚨 **VASSALINGIZGA HUJUM BOSHLANDI!** ⚔️\n\n"
+                f"Lord! Sizning vassalingiz bo'lgan **{target_house['name']}** qal'asiga dushman **{user_house['name']}** xonadoni hujum qildi!\n"
+                f"🛡 Lord sifatida sizning armiyangizning **50% kuchi** avtomatik ravishda vassalingiz mudofaasiga safarbar etiladi!"
+            )
+            await callback.bot.send_message(target_house["overlord_id"], overlord_msg, parse_mode="Markdown")
         except Exception:
             pass
 
@@ -721,6 +707,22 @@ async def callback_battle_resolve(callback: types.CallbackQuery):
     if res.get("ally_support_power", 0) > 0:
         ally_info = f"\n💍 **Ittifoqdosh himoyasi:** {res['ally_house_name']} xonadoni +{res['ally_support_power']} mudofaa kuchi berdi!"
 
+    overlord_info = ""
+    if res.get("overlord_support_power", 0) > 0:
+        overlord_info = f"\n🛡 **Overlord Himoyasi:** Himoyachining Lordi ({res.get('overlord_name', 'Lord')}) 50% qo'shini bilan yordam berdi (+{res['overlord_support_power']} mudofaa kuchi)!"
+
+    special_events = []
+    if res.get("shadow_killed_dragon"):
+        special_events.append(f"👣 **Soya Qotili Hujumi:** Dushmanning 1 ta ajdari ({res['shadow_killed_dragon']}) pistirmada o'ldirildi!")
+    if res.get("witch_kill_dragons"):
+        killed_d_str = ", ".join(res["witch_kill_dragons"])
+        special_events.append(f"🧙 **Suv Jodugari Mudofaasi:** Dushmanning {len(res['witch_kill_dragons'])} ta ajdari ({killed_d_str}) butunlay halok qilindi!")
+    if res.get("witch_kill_spiders"):
+        killed_s_str = ", ".join(res["witch_kill_spiders"])
+        special_events.append(f"🔮 **Soya Jodugari Mudofaasi:** Dushmanning {len(res['witch_kill_spiders'])} ta o'rgamchagi ({killed_s_str}) butunlay halok qilindi!")
+
+    special_events_str = ("\n" + "\n".join(special_events)) if special_events else ""
+
     survivors_note = ""
     if res.get("attacker_survivors"):
         surv = res["attacker_survivors"]
@@ -731,23 +733,41 @@ async def callback_battle_resolve(callback: types.CallbackQuery):
             surv_parts.append(f"{surv['archers']} kamonchi")
         if surv.get("cavalry", 0) > 0:
             surv_parts.append(f"{surv['cavalry']} otliq")
+        if surv.get("chakra", 0) > 0:
+            surv_parts.append(f"{surv['chakra']} chakra")
+        if surv.get("gold_cloaks", 0) > 0:
+            surv_parts.append(f"{surv['gold_cloaks']} tilla plash")
+        if surv.get("unsullied", 0) > 0:
+            surv_parts.append(f"{surv['unsullied']} benuqson")
         if surv_parts:
             survivors_note = f"\n🛡 **Qal'aga omon qaytgan qo'shinlar:** {', '.join(surv_parts)}"
 
     if res["attacker_won"]:
+        if res.get("is_king_ascension"):
+            political_result = (
+                f"👑 **BUYUK TARIXIY VOQEA: OLIY QIROL TAXTI AG'DARILDI!** 🌋\n"
+                f"Siz **Westerosning yangi OLIY QIROLISIZ** (#{1} Targaryen taxti sizga o'tdi)!\n"
+                f"Sobiq Qirol esa taxtdan tushirilib, sizning avvalgi xonadoningizga ko'chirildi va sizga **VASSAL** bo'ldi!"
+            )
+        else:
+            political_result = (
+                f"👑 **SIYOSIY NATIJA:**\n"
+                f"**{res['defender_house']}** xonadoni tizzaga cho'kdi va sizning **VASSALINGIZGA** aylandi! "
+                f"Endi siz ulardan muntazam soliq yig'ib olasiz."
+            )
+
         report = (
             f"🎉 **BUYUK G'ALABA! VALERIYA QON BILAN SUG'ORILDI!** 🩸\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"🏰 Hujum qiluvchi: **{res['attacker_house']}**\n"
             f"🛡 Himoyachi: **{res['defender_house']}**\n\n"
-            f"⚡️ Jangdagi zarba kuchi: **{res['attacker_power']}** vs **{res['defender_power']}**{bannermen_info}{ally_info}\n"
+            f"⚡️ Jangdagi zarba kuchi: **{res['attacker_power']}** vs **{res['defender_power']}**"
+            f"{bannermen_info}{ally_info}{overlord_info}{special_events_str}\n"
             f"🗡 Qurbon bo'lgan askarlaringiz: **{res['attacker_loss']} ta**\n"
             f"💀 Dushmanning yo'qotishlari: **{res['defender_loss']} ta** askar{survivors_note}\n"
             f"💰 Qo'lga kiritilgan o'lja: **+{res['loot_gold']} 🪙**\n\n"
-            f"👑 **SIYOSIY NATIJA:**\n"
-            f"**{res['defender_house']}** xonadoni tizzaga cho'kdi va sizning **VASSALINGIZGA** aylandi! "
-            f"Endi siz ulardan muntazam soliq yig'ib olasiz.\n\n"
-            f"❄️ *Muzlash holati:* Jangda qatnashgan ajdarlaringiz **3 kunga muzladi**."
+            f"{political_result}\n\n"
+            f"❄️ *Muzlash holati:* Jangda qatnashgan ajdarlaringiz **3 kunga (72 soat)**, o'rgamchaklaringiz esa **28 soatga** muzladi."
         )
     else:
         reward_bannermen_note = "\n💰 *Yordamga kelgan barcha bayroqdorlarga +30 🪙 mukofot berildi!*" if res.get("bannermen_count", 0) > 0 else ""
@@ -756,10 +776,11 @@ async def callback_battle_resolve(callback: types.CallbackQuery):
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"🏰 Hujum qiluvchi: **{res['attacker_house']}**\n"
             f"🛡 Himoyachi: **{res['defender_house']}**\n\n"
-            f"⚡️ Jangdagi zarba kuchi: **{res['attacker_power']}** vs **{res['defender_power']}**{bannermen_info}\n"
+            f"⚡️ Jangdagi zarba kuchi: **{res['attacker_power']}** vs **{res['defender_power']}**"
+            f"{bannermen_info}{overlord_info}{special_events_str}\n"
             f"🗡 Halok bo'lgan askarlaringiz: **{res['attacker_loss']} ta**\n"
-            f"🛡 Qal'a va uning bayroqdorlari hujumni muvaffaqiyatli qaytardi!{reward_bannermen_note}{survivors_note}\n\n"
-            f"❄️ *Muzlash holati:* Jangda qatnashgan ajdarlaringiz **3 kunga muzladi**."
+            f"🛡 Qal'a va uning himoyachilari hujumni muvaffaqiyatli qaytardi!{reward_bannermen_note}{survivors_note}\n\n"
+            f"❄️ *Muzlash holati:* Jangda qatnashgan ajdarlaringiz **3 kunga (72 soat)**, o'rgamchaklaringiz esa **28 soatga** muzladi."
         )
 
     await callback.message.edit_text(report, parse_mode="Markdown")
@@ -770,13 +791,17 @@ async def callback_battle_resolve(callback: types.CallbackQuery):
         try:
             res_status_str = "💀 Mag'lubiyatga uchradingiz" if res['attacker_won'] else "🛡 Hujumni muvaffaqiyatli qaytardingiz!"
             loot_str = f"Boy berilgan oltin: -{res['loot_gold']} 🪙\n" if res['attacker_won'] else ""
+            king_lost_str = "\n👑 **QIROLLIK TAXTI BOY BERILDI!** Dushman sizni taxtdan ag'dardi va siz endi yangi Qirolning vassalisiz!" if res.get("is_king_ascension") else ""
             def_alert = (
                 f"⚔️ **QAL'ANGIZGA QILINGAN HUJUM YAKUNLANDI!**\n\n"
                 f"Hujumchi: **{res['attacker_house']}**\n"
                 f"Natija: {res_status_str}\n"
                 f"Talafot: -{res['defender_loss']} askar\n"
-                f"{loot_str}"
+                f"{loot_str}{king_lost_str}"
             )
+            await callback.bot.send_message(res["defender_id"], def_alert, parse_mode="Markdown")
+        except Exception:
+            pass
             await callback.bot.send_message(res["defender_id"], def_alert, parse_mode="Markdown")
         except Exception:
             pass

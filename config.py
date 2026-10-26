@@ -77,6 +77,25 @@ DONATE_PACKAGES = {
         "poison": 80,
         "chakra": 2500,
         "desc": "35,000 🪙 Oltin + 4,000 Benuqson 🛡 + 6 Valeriya Po'lati ⚔️ + 60 Yuzsiz 🥷 + 40 Soya 👣 + 80 Zahar 🧪 + 2,500 Chakra ⚙️"
+    },
+    5: {
+        "id": 5,
+        "name": "To'rt Jodugar Paketi (Witches Pack)",
+        "cost_uzs": 17000,
+        "gold": 2000,
+        "unsullied": 0,
+        "valyrian_steel": 0,
+        "faceless": 0,
+        "shadow": 0,
+        "poison": 0,
+        "chakra": 0,
+        "witches": {
+            "red": 1,
+            "blood": 1,
+            "water": 1,
+            "shadow": 1
+        },
+        "desc": "Qizil 👩‍🦰 + Qon 🩸 + Suv 🧙 + Soya 🔮 Jodugarlari + 2,000 🪙 Bonus Oltin"
     }
 }
 
@@ -260,6 +279,16 @@ DRAGON_GRADES = {
 
 # Ajdar muzlash vaqti (3 kun = 72 soat = 259,200 soniya)
 DRAGON_FREEZE_SECONDS = 3 * 24 * 3600
+
+# O'rgamchak muzlash vaqti (28 soat = 100,800 soniya)
+SPIDER_FREEZE_SECONDS = 28 * 3600
+
+# Westeros talon-taroj qilish umumiy limiti (6 soat = 21,600 soniya)
+WESTEROS_GLOBAL_COOLDOWN = 6 * 3600
+
+# Josuslik narxi va vaqti
+SPY_COST = 300
+SPY_DURATION_SECONDS = 30 * 60
 
 # Jang davomiyligi (8 daqiqa = 480 soniya)
 BATTLE_DURATION_SECONDS = 8 * 60

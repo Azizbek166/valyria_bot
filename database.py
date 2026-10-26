@@ -11,7 +11,9 @@ from config import (
     UNITS, DRAGON_GRADES, DRAGON_FREEZE_SECONDS, REGIONS,
     ESSOS_MARKET, CASTLE_INCOME, CASTLE_COST, TIER_A_HOUSES,
     DONATE_PACKAGES, CHAKRA_DAILY_LIMIT, LOAN_PACKAGES,
-    BATTLE_DURATION_SECONDS, WESTEROS_TARGETS
+    BATTLE_DURATION_SECONDS, WESTEROS_TARGETS,
+    SPIDER_FREEZE_SECONDS, WESTEROS_GLOBAL_COOLDOWN,
+    SPY_COST, SPY_DURATION_SECONDS
 )
 
 @asynccontextmanager
@@ -69,6 +71,8 @@ async def init_db():
             await db.execute("ALTER TABLE users ADD COLUMN tournament_wins INTEGER DEFAULT 0")
         if "tournament_fights" not in u_columns:
             await db.execute("ALTER TABLE users ADD COLUMN tournament_fights INTEGER DEFAULT 0")
+        if "last_westeros_raid_at" not in u_columns:
+            await db.execute("ALTER TABLE users ADD COLUMN last_westeros_raid_at INTEGER DEFAULT 0")
 
         # Houses jadvali (52 ta xonadon, 5 ta hudud)
         await db.execute("""
@@ -274,6 +278,33 @@ async def init_db():
                 total_looted_chakra INTEGER DEFAULT 0,
                 raids_count INTEGER DEFAULT 0,
                 UNIQUE(user_id, target_id)
+            )
+        """)
+
+        # Josuslar (Spies) jadvali
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS spies (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                target_house_id INTEGER NOT NULL,
+                sent_at INTEGER NOT NULL,
+                reveal_at INTEGER NOT NULL,
+                status TEXT DEFAULT 'active'
+            )
+        """)
+
+        # Jodugarlar (Witches) jadvali
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS user_witches (
+                user_id INTEGER PRIMARY KEY,
+                red_witch INTEGER DEFAULT 0,
+                blood_witch INTEGER DEFAULT 0,
+                water_witch INTEGER DEFAULT 0,
+                shadow_witch INTEGER DEFAULT 0,
+                red_unfreeze_used_at INTEGER DEFAULT 0,
+                red_spy_used_at INTEGER DEFAULT 0,
+                blood_defends_today INTEGER DEFAULT 0,
+                blood_reset_day INTEGER DEFAULT 0
             )
         """)
 
@@ -735,7 +766,10 @@ async def calculate_player_power(telegram_id: int) -> Dict[str, Any]:
         valyrian_steel_power
     )
 
-    spiders_power = sum(b["power"] for b in beasts if b["beast_type"] == "spider")
+    spiders_active_power = 0
+    spiders_frozen_power = 0
+    active_spiders = []
+    frozen_spiders = []
 
     dragons_active_power = 0
     dragons_frozen_power = 0
@@ -743,7 +777,14 @@ async def calculate_player_power(telegram_id: int) -> Dict[str, Any]:
     frozen_dragons = []
 
     for b in beasts:
-        if b["beast_type"] == "dragon":
+        if b["beast_type"] == "spider":
+            if b["frozen_until"] > now:
+                spiders_frozen_power += b["power"]
+                frozen_spiders.append(b)
+            else:
+                spiders_active_power += b["power"]
+                active_spiders.append(b)
+        elif b["beast_type"] == "dragon":
             if b["frozen_until"] > now:
                 dragons_frozen_power += b["power"]
                 frozen_dragons.append(b)
@@ -751,11 +792,14 @@ async def calculate_player_power(telegram_id: int) -> Dict[str, Any]:
                 dragons_active_power += b["power"]
                 active_dragons.append(b)
 
-    total_attack_power = troops_power + spiders_power + dragons_active_power
+    total_attack_power = troops_power + spiders_active_power + dragons_active_power
 
     return {
         "troops_power": troops_power,
-        "spiders_power": spiders_power,
+        "spiders_power": spiders_active_power,
+        "spiders_frozen_power": spiders_frozen_power,
+        "active_spiders": active_spiders,
+        "frozen_spiders": frozen_spiders,
         "dragons_active_power": dragons_active_power,
         "dragons_frozen_power": dragons_frozen_power,
         "total_active_power": total_attack_power,
@@ -903,6 +947,7 @@ async def start_house_attack(
         # Ajdarlarni tekshirish
         dragon_ids = selected_troops.get("dragon_ids", [])
         verified_dragons = []
+        available_dragons = {}
         if dragon_ids:
             cursor = await db.execute(
                 "SELECT * FROM beasts WHERE user_id = ? AND beast_type = 'dragon' AND frozen_until <= ?",
@@ -914,10 +959,52 @@ async def start_house_attack(
                     verified_dragons.append(did)
         cleaned_troops["dragon_ids"] = verified_dragons
 
+        # O'rgamchaklarni tekshirish
+        spider_ids = selected_troops.get("spider_ids", [])
+        verified_spiders = []
+        available_spiders = {}
+        if spider_ids:
+            cursor = await db.execute(
+                "SELECT * FROM beasts WHERE user_id = ? AND beast_type = 'spider' AND frozen_until <= ?",
+                (attacker_id, now)
+            )
+            available_spiders = {s["id"]: dict(s) for s in await cursor.fetchall()}
+            for sid in spider_ids:
+                if sid in available_spiders:
+                    verified_spiders.append(sid)
+        cleaned_troops["spider_ids"] = verified_spiders
+
+        # Maxsus taktik zarbalar (Zahar, Yuzsiz, Soya qotili)
+        poison_strike = bool(selected_troops.get("poison_strike", False))
+        faceless_strike = bool(selected_troops.get("faceless_strike", False))
+        shadow_strike = bool(selected_troops.get("shadow_strike", False))
+
+        if poison_strike:
+            if army.get("poison", 0) < 1:
+                return False, "Sizda Zahar Hujumi qilish uchun zahar yetarli emas!", None
+            cleaned_troops["poison"] = max(1, cleaned_troops.get("poison", 0))
+
+        if faceless_strike:
+            if army.get("faceless", 0) < 1:
+                return False, "Sizda Yuzsiz Qotil Hujumi qilish uchun Yuzsiz Qotil yetarli emas!", None
+            cleaned_troops["faceless"] = max(1, cleaned_troops.get("faceless", 0))
+
+        if shadow_strike:
+            if army.get("shadow", 0) < 1:
+                return False, "Sizda Soya Qotili Hujumi qilish uchun Soya Qotili yetarli emas!", None
+            cleaned_troops["shadow"] = max(1, cleaned_troops.get("shadow", 0))
+
+        cleaned_troops["poison_strike"] = poison_strike
+        cleaned_troops["faceless_strike"] = faceless_strike
+        cleaned_troops["shadow_strike"] = shadow_strike
+
         # Quvvatni hisoblash
         user_row = await get_user(attacker_id)
         valyrian_steel = user_row.get("valyrian_steel", 0) if user_row else 0
-        chakra_mult = 2 if valyrian_steel >= 1 else 1
+        include_valyrian = bool(selected_troops.get("include_valyrian", True))
+        cleaned_troops["include_valyrian"] = include_valyrian
+        effective_valyrian = valyrian_steel if include_valyrian else 0
+        chakra_mult = 2 if effective_valyrian >= 1 else 1
 
         power = (
             cleaned_troops["soldiers"] * UNITS["soldier"]["atk"] +
@@ -928,15 +1015,20 @@ async def start_house_attack(
             cleaned_troops["unsullied"] * UNITS["unsullied"]["atk"] +
             cleaned_troops["faceless"] * UNITS["faceless"]["atk"] +
             cleaned_troops["shadow"] * UNITS["shadow"]["atk"] +
-            cleaned_troops["poison"] * UNITS["poison"]["atk"]
+            cleaned_troops["poison"] * UNITS["poison"]["atk"] +
+            (effective_valyrian * 500)
         )
 
         for did in verified_dragons:
             d_obj = available_dragons[did]
             power += d_obj.get("power", 500)
 
+        for sid in verified_spiders:
+            s_obj = available_spiders[sid]
+            power += s_obj.get("power", 500)
+
         if power <= 0:
-            return False, "⚠️ Jangga kamida bitta askar yoki ajdar tanlashingiz kerak!", None
+            return False, "⚠️ Jangga kamida bitta askar, maxluq yoki qurol tanlashingiz kerak!", None
 
         # Yuborilgan qo'shinlarni zaxiradan yechish (yurishda)
         await db.execute("""
@@ -1011,15 +1103,18 @@ async def resolve_battle(battle_id: int) -> Dict[str, Any]:
         troops = json.loads(battle["troops_json"])
 
         cursor = await db.execute("SELECT * FROM houses WHERE owner_id = ?", (attacker_id,))
-        attacker_house = await cursor.fetchone()
+        att_row = await cursor.fetchone()
         cursor = await db.execute("SELECT * FROM houses WHERE id = ?", (defender_house_id,))
-        defender_house = await cursor.fetchone()
+        def_row = await cursor.fetchone()
 
-        if not attacker_house or not defender_house:
+        if not att_row or not def_row:
             await _refund_troops(db, attacker_id, troops)
             await db.execute("UPDATE active_battles SET status = 'cancelled' WHERE id = ?", (battle_id,))
             await db.commit()
             return {"success": False, "error": "Xonadon ma'lumotlarida o'zgarish bo'lganligi sababli jang bekor qilindi va qo'shinlar qaytarildi."}
+
+        attacker_house = dict(att_row)
+        defender_house = dict(def_row)
 
         defender_id = defender_house["owner_id"]
         if defender_id is None:
@@ -1054,6 +1149,43 @@ async def resolve_battle(battle_id: int) -> Dict[str, Any]:
                 if d_row:
                     att_power += d_row["power"]
 
+        sent_spider_ids = troops.get("spider_ids", [])
+        if sent_spider_ids:
+            for sid in sent_spider_ids:
+                cursor = await db.execute("SELECT power FROM beasts WHERE id = ?", (sid,))
+                s_row = await cursor.fetchone()
+                if s_row:
+                    att_power += s_row["power"]
+
+        # Himoyachi jodugarlarining mudofaadagi avto-zarbasi
+        cursor = await db.execute("SELECT * FROM user_witches WHERE user_id = ?", (defender_id,))
+        def_witches_row = await cursor.fetchone()
+        def_witches = dict(def_witches_row) if def_witches_row else {}
+
+        witch_kill_dragons = []
+        if def_witches.get("water_witch", 0) > 0 and sent_dragon_ids:
+            d_to_kill = sent_dragon_ids[:2]
+            for did in d_to_kill:
+                cursor = await db.execute("SELECT name, power FROM beasts WHERE id = ?", (did,))
+                dr = await cursor.fetchone()
+                if dr:
+                    witch_kill_dragons.append(dr["name"] or "Ajdar")
+                    att_power = max(0, att_power - dr["power"])
+                    await db.execute("DELETE FROM beasts WHERE id = ?", (did,))
+            sent_dragon_ids = [d for d in sent_dragon_ids if d not in d_to_kill]
+
+        witch_kill_spiders = []
+        if def_witches.get("shadow_witch", 0) > 0 and sent_spider_ids:
+            s_to_kill = sent_spider_ids[:2]
+            for sid in s_to_kill:
+                cursor = await db.execute("SELECT name, power FROM beasts WHERE id = ?", (sid,))
+                sr = await cursor.fetchone()
+                if sr:
+                    witch_kill_spiders.append(sr["name"] or "O'rgamchak")
+                    att_power = max(0, att_power - sr["power"])
+                    await db.execute("DELETE FROM beasts WHERE id = ?", (sid,))
+            sent_spider_ids = [s for s in sent_spider_ids if s not in s_to_kill]
+
         # Hujumchining Manfaatli Ittifoqchisi ko'magi (+25%)
         att_strategic = await get_house_alliance(attacker_house["id"], "strategic")
         if att_strategic:
@@ -1065,6 +1197,36 @@ async def resolve_battle(battle_id: int) -> Dict[str, Any]:
         # Himoyachi kuchi
         def_power_info = await calculate_player_power(defender_id)
         def_power = def_power_info["total_active_power"]
+
+        # Hujumchining maxsus taktik zarbalari (Soya qotili, Zahar, Yuzsiz)
+        shadow_killed_dragon = None
+        if troops.get("shadow_strike") and troops.get("shadow", 0) > 0:
+            cursor = await db.execute(
+                "SELECT id, name, power FROM beasts WHERE user_id = ? AND beast_type = 'dragon' LIMIT 1",
+                (defender_id,)
+            )
+            vic = await cursor.fetchone()
+            if vic:
+                shadow_killed_dragon = vic["name"] or "Ajdar"
+                def_power = max(0, def_power - vic["power"])
+                await db.execute("DELETE FROM beasts WHERE id = ?", (vic["id"],))
+
+        if troops.get("poison_strike") and troops.get("poison", 0) > 0:
+            def_power = max(10, int(def_power * 0.75))
+
+        if troops.get("faceless_strike") and troops.get("faceless", 0) > 0:
+            def_power = max(10, int(def_power * 0.70))
+
+        # Overlord himoyasi: agar himoyachi vassal bo'lsa, uning Lordi (Overlord) 50% quvvat bilan yordamga keladi!
+        overlord_support_power = 0
+        overlord_name = ""
+        if defender_house.get("overlord_id") and defender_house["overlord_id"] != attacker_id:
+            ov_id = defender_house["overlord_id"]
+            ov_power_info = await calculate_player_power(ov_id)
+            overlord_support_power = max(25, int(ov_power_info.get("total_active_power", 0) * 0.5))
+            def_power += overlord_support_power
+            ov_u = await get_user(ov_id)
+            overlord_name = ov_u.get("custom_name") or ov_u.get("full_name") or f"Lord #{ov_id}"
 
         bannermen_power = 0
         bannermen_count = 0
@@ -1100,13 +1262,25 @@ async def resolve_battle(battle_id: int) -> Dict[str, Any]:
         def_roll = round(def_power * random.uniform(0.9, 1.15))
         attacker_won = att_roll > def_roll
 
-        # Ajdarlarni muzlatish (faqat jangda qatnashgan ajdarlar!)
+        # Ajdarlarni muzlatish (72 soat = 3 kun)
         freeze_end = now + DRAGON_FREEZE_SECONDS
         if sent_dragon_ids:
             for did in sent_dragon_ids:
                 await db.execute("UPDATE beasts SET frozen_until = ? WHERE id = ?", (freeze_end, did))
         for dragon in def_power_info["active_dragons"]:
             await db.execute("UPDATE beasts SET frozen_until = ? WHERE id = ?", (freeze_end, dragon["id"]))
+
+        # O'rgamchaklarni muzlatish (28 soat)
+        spider_freeze_end = now + SPIDER_FREEZE_SECONDS
+        if sent_spider_ids:
+            for sid in sent_spider_ids:
+                await db.execute("UPDATE beasts SET frozen_until = ? WHERE id = ?", (spider_freeze_end, sid))
+        cursor = await db.execute(
+            "SELECT id FROM beasts WHERE user_id = ? AND beast_type = 'spider' AND frozen_until <= ?",
+            (defender_id, now)
+        )
+        for s in await cursor.fetchall():
+            await db.execute("UPDATE beasts SET frozen_until = ? WHERE id = ?", (spider_freeze_end, s["id"]))
 
         # Talafotlar (faqat yuborilgan askarlardan yo'qotish hisoblanadi!)
         loss_rate_att = random.uniform(0.1, 0.25) if attacker_won else random.uniform(0.3, 0.55)
@@ -1128,6 +1302,17 @@ async def resolve_battle(battle_id: int) -> Dict[str, Any]:
             else:
                 att_losses[col] = 0
                 att_survivors[col] = 0
+
+        # Maxsus taktik zarbalar (Zahar, Yuzsiz, Soya) sarflanadi
+        if troops.get("poison_strike") and att_survivors.get("poison", 0) > 0:
+            att_survivors["poison"] = max(0, att_survivors["poison"] - 1)
+            att_losses["poison"] = att_losses.get("poison", 0) + 1
+        if troops.get("faceless_strike") and att_survivors.get("faceless", 0) > 0:
+            att_survivors["faceless"] = max(0, att_survivors["faceless"] - 1)
+            att_losses["faceless"] = att_losses.get("faceless", 0) + 1
+        if troops.get("shadow_strike") and att_survivors.get("shadow", 0) > 0:
+            att_survivors["shadow"] = max(0, att_survivors["shadow"] - 1)
+            att_losses["shadow"] = att_losses.get("shadow", 0) + 1
 
         # Omon qolgan askarlarni qal'aga qaytarish!
         await db.execute("""
@@ -1174,6 +1359,7 @@ async def resolve_battle(battle_id: int) -> Dict[str, Any]:
         # O'lja va Vassal qilish
         loot_gold = 0
         vassalized = False
+        is_king_ascension = False
 
         if attacker_won:
             def_user = await get_user(defender_id)
@@ -1187,10 +1373,17 @@ async def resolve_battle(battle_id: int) -> Dict[str, Any]:
                     ally_loot_share = max(5, int(loot_gold * 0.2))
                     await db.execute("UPDATE users SET gold = gold + ? WHERE telegram_id = ?", (ally_loot_share, strat_partner_id))
 
-            await db.execute(
-                "UPDATE houses SET overlord_id = ?, captured_at = ? WHERE id = ?",
-                (attacker_id, now, defender_house_id)
-            )
+            if defender_house_id == 1:
+                # OLIY QIROL TAXTI AG'DARILDI!
+                is_king_ascension = True
+                await db.execute("UPDATE houses SET owner_id = NULL WHERE id = ?", (attacker_house["id"],))
+                await db.execute("UPDATE houses SET owner_id = ?, overlord_id = NULL WHERE id = 1", (attacker_id,))
+                await db.execute("UPDATE houses SET owner_id = ?, overlord_id = ? WHERE id = ?", (defender_id, attacker_id, attacker_house["id"]))
+            else:
+                await db.execute(
+                    "UPDATE houses SET overlord_id = ?, captured_at = ? WHERE id = ?",
+                    (attacker_id, now, defender_house_id)
+                )
             vassalized = True
         else:
             if defender_house["overlord_id"] == attacker_id:
@@ -1209,9 +1402,9 @@ async def resolve_battle(battle_id: int) -> Dict[str, Any]:
 
         log_text = (
             f"Jang: {'Hujumchi' if attacker_won else 'Himoyachi'} g'alaba. "
-            f"Hujum: {att_roll}, Himoya: {def_roll} (Bayroqdorlar: {bannermen_power}, Ittifoqchi: {ally_support_power}). "
+            f"Hujum: {att_roll}, Himoya: {def_roll} (Bayroqdorlar: {bannermen_power}, Ittifoqchi: {ally_support_power}, Overlord: {overlord_support_power}). "
             f"Hujumchi yo'qotishi: {total_att_lost}, Himoyachi: {total_def_lost}. "
-            f"O'lja: {loot_gold} 🪙. Vassal: {vassalized}"
+            f"O'lja: {loot_gold} 🪙. Vassal: {vassalized}. Taxt almashdi: {is_king_ascension}"
         )
         await db.execute(
             "INSERT INTO battles_log (attacker_id, defender_id, winner_id, log_text, timestamp) VALUES (?, ?, ?, ?, ?)",
@@ -1234,12 +1427,18 @@ async def resolve_battle(battle_id: int) -> Dict[str, Any]:
             "bannermen_count": bannermen_count,
             "ally_support_power": ally_support_power,
             "ally_house_name": ally_house_name,
+            "overlord_support_power": overlord_support_power,
+            "overlord_name": overlord_name,
+            "shadow_killed_dragon": shadow_killed_dragon,
+            "witch_kill_dragons": witch_kill_dragons,
+            "witch_kill_spiders": witch_kill_spiders,
             "attacker_loss": total_att_lost,
             "attacker_losses_detail": att_losses,
             "attacker_survivors": att_survivors,
             "defender_loss": total_def_lost,
             "loot_gold": loot_gold,
             "vassalized": vassalized,
+            "is_king_ascension": is_king_ascension,
             "dragons_frozen": len(sent_dragon_ids)
         }
 
@@ -1988,6 +2187,18 @@ async def approve_donation_request(donation_id: int, admin_id: int) -> tuple[boo
             WHERE user_id = ?
         """, (unsullied, faceless, shadow, poison, chakra, user_id))
 
+        if pkg.get("witches"):
+            w = pkg["witches"]
+            await db.execute("""
+                INSERT INTO user_witches (user_id, red_witch, blood_witch, water_witch, shadow_witch)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    red_witch = red_witch + excluded.red_witch,
+                    blood_witch = blood_witch + excluded.blood_witch,
+                    water_witch = water_witch + excluded.water_witch,
+                    shadow_witch = shadow_witch + excluded.shadow_witch
+            """, (user_id, w.get("red", 0), w.get("blood", 0), w.get("water", 0), w.get("shadow", 0)))
+
         await db.execute("""
             UPDATE donations SET 
                 status = 'approved',
@@ -2255,24 +2466,32 @@ async def get_user_westeros_cooldowns(user_id: int) -> Dict[str, Any]:
         rows = await cursor.fetchall()
         user_raids = {r["target_id"]: r["last_raided_at"] for r in rows}
 
+        cursor = await db.execute("SELECT last_westeros_raid_at FROM users WHERE telegram_id = ?", (user_id,))
+        u_row = await cursor.fetchone()
+        last_global_raid = u_row["last_westeros_raid_at"] if u_row and "last_westeros_raid_at" in u_row.keys() and u_row["last_westeros_raid_at"] else 0
+
+    global_left = max(0, WESTEROS_GLOBAL_COOLDOWN - (now - last_global_raid))
+
     for t_id, target in WESTEROS_TARGETS.items():
         last_t = user_raids.get(t_id, 0)
         cd = target["cooldown_seconds"]
         passed = now - last_t
-        if passed >= cd:
+        local_left = max(0, cd - passed)
+        eff_left = max(global_left, local_left)
+
+        if eff_left == 0:
             result[t_id] = {"ready": True, "left_seconds": 0, "left_str": "Tayyor ⚔️"}
         else:
-            left = cd - passed
-            h = left // 3600
-            m = (left % 3600) // 60
-            s = left % 60
+            h = eff_left // 3600
+            m = (eff_left % 3600) // 60
+            s = eff_left % 60
             if h > 0:
                 t_str = f"{h}s {m}d"
             elif m > 0:
                 t_str = f"{m}d {s}s"
             else:
-                t_str = f"{s} soniya"
-            result[t_id] = {"ready": False, "left_seconds": left, "left_str": f"⏳ {t_str}"}
+                t_str = f"{s}s"
+            result[t_id] = {"ready": False, "left_seconds": eff_left, "left_str": f"⏳ {t_str}"}
     return result
 
 async def get_user_westeros_stats(user_id: int) -> Dict[str, Any]:
@@ -2299,23 +2518,30 @@ async def execute_westeros_raid(user_id: int, target_id: str) -> tuple[bool, str
 
     now = int(time.time())
     async with get_db_connection() as db:
-        cursor = await db.execute("SELECT last_raided_at FROM westeros_raids WHERE user_id = ? AND target_id = ?", (user_id, target_id))
-        row = await cursor.fetchone()
+        cursor = await db.execute("SELECT last_westeros_raid_at FROM users WHERE telegram_id = ?", (user_id,))
+        u_row = await cursor.fetchone()
+        last_global_raid = u_row["last_westeros_raid_at"] if u_row and "last_westeros_raid_at" in u_row.keys() and u_row["last_westeros_raid_at"] else 0
 
-    if row:
-        diff = now - row["last_raided_at"]
-        if diff < target["cooldown_seconds"]:
-            left = target["cooldown_seconds"] - diff
+        if now - last_global_raid < WESTEROS_GLOBAL_COOLDOWN:
+            left = WESTEROS_GLOBAL_COOLDOWN - (now - last_global_raid)
             h = left // 3600
             m = (left % 3600) // 60
             s = left % 60
-            if h > 0:
-                t_str = f"{h} soat {m} daqiqa"
-            elif m > 0:
-                t_str = f"{m} daqiqa {s} soniya"
-            else:
-                t_str = f"{s} soniya"
-            return False, f"⏳ Ushbu manzilga qayta hujum qilish uchun hali {t_str} kutish kerak!", {}
+            t_str = f"{h} soat {m} daqiqa" if h > 0 else f"{m} daqiqa {s} soniya"
+            return False, f"⏳ Westerosni qayta talon-taroj qilish uchun hali {t_str} kutishingiz kerak! (6 soatlik reyd limiti)", {}
+
+        cursor = await db.execute("SELECT last_raided_at FROM westeros_raids WHERE user_id = ? AND target_id = ?", (user_id, target_id))
+        row = await cursor.fetchone()
+
+        if row:
+            diff = now - row["last_raided_at"]
+            if diff < target["cooldown_seconds"]:
+                left = target["cooldown_seconds"] - diff
+                h = left // 3600
+                m = (left % 3600) // 60
+                s = left % 60
+                t_str = f"{h} soat {m} daqiqa" if h > 0 else f"{m} daqiqa {s} soniya"
+                return False, f"⏳ Ushbu manzilga qayta hujum qilish uchun hali {t_str} kutish kerak!", {}
 
     power_info = await calculate_player_power(user_id)
     total_power = power_info.get("total_active_power", 0)
@@ -2340,9 +2566,10 @@ async def execute_westeros_raid(user_id: int, target_id: str) -> tuple[bool, str
         await db.execute("""
             UPDATE users SET
                 gold = gold + ?,
-                valyrian_steel = valyrian_steel + ?
+                valyrian_steel = valyrian_steel + ?,
+                last_westeros_raid_at = ?
             WHERE telegram_id = ?
-        """, (looted_gold, got_steel, user_id))
+        """, (looted_gold, got_steel, now, user_id))
 
         await db.execute("""
             UPDATE armies SET
@@ -2373,4 +2600,267 @@ async def execute_westeros_raid(user_id: int, target_id: str) -> tuple[bool, str
         "total_power": total_power
     }
     return True, "Muvaffaqiyatli", report
+
+# --- Vassallarni Ozod Qilish (Free Vassals) ---
+
+async def free_vassal_by_overlord(overlord_id: int, house_id: int) -> tuple[bool, str]:
+    async with get_db_connection() as db:
+        cursor = await db.execute("SELECT * FROM houses WHERE id = ? AND overlord_id = ?", (house_id, overlord_id))
+        house = await cursor.fetchone()
+        if not house:
+            return False, "Ushbu xonadon sizning vassalingiz emas!"
+
+        await db.execute("UPDATE houses SET overlord_id = NULL WHERE id = ?", (house_id,))
+        await db.commit()
+
+    return True, f"🕊 Siz muvaffaqiyatli ravishda **{house['name']}** xonadonini vassallikdan ozod qildingiz! Endi ular erkin xonadon."
+
+# --- Jodugarlar (Witches) Funksiyalari ---
+
+async def get_user_witches(user_id: int) -> Dict[str, Any]:
+    async with get_db_connection() as db:
+        cursor = await db.execute("SELECT * FROM user_witches WHERE user_id = ?", (user_id,))
+        row = await cursor.fetchone()
+        if not row:
+            return {
+                "red_witch": 0, "blood_witch": 0, "water_witch": 0, "shadow_witch": 0,
+                "red_unfreeze_used_at": 0, "red_spy_used_at": 0, "blood_defends_today": 0
+            }
+        return dict(row)
+
+async def red_witch_unfreeze_dragon(user_id: int) -> tuple[bool, str]:
+    witches = await get_user_witches(user_id)
+    if witches.get("red_witch", 0) <= 0:
+        return False, "Sizda Qizil Jodugar 👩‍🦰 mavjud emas!"
+
+    now = int(time.time())
+    today_start = now - (now % 86400)
+    if witches.get("red_unfreeze_used_at", 0) >= today_start:
+        return False, "⚠️ Qizil Jodugar bugun allaqachon bitta ajdarni eritgan! Yangi imkoniyat ertaga ochiladi."
+
+    async with get_db_connection() as db:
+        cursor = await db.execute(
+            "SELECT * FROM beasts WHERE user_id = ? AND beast_type = 'dragon' AND frozen_until > ? LIMIT 1",
+            (user_id, now)
+        )
+        dragon = await cursor.fetchone()
+        if not dragon:
+            return False, "Hozirda sizda muzlagan ajdar mavjud emas!"
+
+        await db.execute("UPDATE beasts SET frozen_until = 0 WHERE id = ?", (dragon["id"],))
+        await db.execute("UPDATE user_witches SET red_unfreeze_used_at = ? WHERE user_id = ?", (now, user_id))
+        await db.commit()
+
+    return True, f"👩‍🦰 Qizil Jodugar sehrli olov bilan **{dragon['name']}** ajdaringizni muzdan chiqardi va jangga tayyorladi! 🔥"
+
+async def red_witch_instant_spy(user_id: int, target_house_id: int) -> tuple[bool, str, Dict[str, Any]]:
+    witches = await get_user_witches(user_id)
+    if witches.get("red_witch", 0) <= 0:
+        return False, "Sizda Qizil Jodugar 👩‍🦰 mavjud emas!", {}
+
+    now = int(time.time())
+    today_start = now - (now % 86400)
+    if witches.get("red_spy_used_at", 0) >= today_start:
+        return False, "⚠️ Qizil Jodugar bugungi tezkor ko'rish sehrini allaqachon ishlatgan! Ertagacha kuting.", {}
+
+    async with get_db_connection() as db:
+        cursor = await db.execute("SELECT * FROM houses WHERE id = ?", (target_house_id,))
+        target_house = await cursor.fetchone()
+        if not target_house or not target_house["owner_id"]:
+            return False, "Ushbu xonadonda hukmdor yo'q!", {}
+
+        target_owner_id = target_house["owner_id"]
+        if target_owner_id == user_id:
+            return False, "O'z xonadoningizga sehr ishlatish shart emas!", {}
+
+        # Dushmanda Qon Jodugari himoyasi bormi?
+        cursor = await db.execute("SELECT * FROM user_witches WHERE user_id = ?", (target_owner_id,))
+        t_witches = await cursor.fetchone()
+        today_ordinal = datetime.now().toordinal()
+
+        if t_witches and t_witches["blood_witch"] > 0:
+            defends = t_witches["blood_defends_today"] if t_witches["blood_reset_day"] == today_ordinal else 0
+            if defends < 2:
+                # Qon Jodugari sehrni to'sadi!
+                await db.execute("""
+                    UPDATE user_witches SET blood_defends_today = ?, blood_reset_day = ? WHERE user_id = ?
+                """, (defends + 1, today_ordinal, target_owner_id))
+                await db.execute("UPDATE user_witches SET red_spy_used_at = ? WHERE user_id = ?", (now, user_id))
+                await db.commit()
+                return False, "🩸 DUSHMAN QON JODUGARI QALQONI! Dushman qal'asidagi Qon Jodugari qonli to'siq hosil qilib, Qizil Jodugaringiz nigohini qaytarib tashladi!", {"intercepted": True}
+
+        await db.execute("UPDATE user_witches SET red_spy_used_at = ? WHERE user_id = ?", (now, user_id))
+        await db.commit()
+
+    report = await _fetch_house_spy_report_data(target_house_id, target_owner_id)
+    return True, "👩‍🦰 Qizil Jodugar o'zining sirli ko'zgusi orqali dushman qal'asi resurslarini bir zumda ochib berdi!", report
+
+# --- Josuslik (Spies) Tizimi ---
+
+async def send_spy(user_id: int, target_house_id: int) -> tuple[bool, str, Dict[str, Any]]:
+    async with get_db_connection() as db:
+        cursor = await db.execute("SELECT * FROM houses WHERE id = ?", (target_house_id,))
+        target_house = await cursor.fetchone()
+        if not target_house or not target_house["owner_id"]:
+            return False, "Ushbu xonadonda hukmdor yo'q, josus yuborish ma'nosiz!", {}
+
+        target_owner_id = target_house["owner_id"]
+        if target_owner_id == user_id:
+            return False, "O'z xonadoningizga josus yubora olmaysiz!", {}
+
+        user = await get_user(user_id)
+        if not user or user["gold"] < SPY_COST:
+            return False, f"Mablag' yetarli emas! Josus yollash uchun {SPY_COST} 🪙 oltin kerak.", {}
+
+        now = int(time.time())
+        # Faol josus borligini tekshirish
+        cursor = await db.execute(
+            "SELECT * FROM spies WHERE user_id = ? AND target_house_id = ? AND status = 'active' AND reveal_at > ?",
+            (user_id, target_house_id, now)
+        )
+        existing = await cursor.fetchone()
+        if existing:
+            left_min = (existing["reveal_at"] - now) // 60
+            return False, f"⏳ Siz allaqachon ushbu xonadonga josus yuborgansiz! Hisobotgacha {left_min} daqiqa qoldi.", {}
+
+        # Dushman Qon Jodugari himoyasini tekshirish (kuniga 2 marta avto-himoya)
+        cursor = await db.execute("SELECT * FROM user_witches WHERE user_id = ?", (target_owner_id,))
+        t_witches = await cursor.fetchone()
+        today_ordinal = datetime.now().toordinal()
+
+        is_intercepted = False
+        if t_witches and t_witches["blood_witch"] > 0:
+            defends = t_witches["blood_defends_today"] if t_witches["blood_reset_day"] == today_ordinal else 0
+            if defends < 2:
+                is_intercepted = True
+                await db.execute("""
+                    UPDATE user_witches SET blood_defends_today = ?, blood_reset_day = ? WHERE user_id = ?
+                """, (defends + 1, today_ordinal, target_owner_id))
+
+        # Oltinni yechish
+        await db.execute("UPDATE users SET gold = gold - ? WHERE telegram_id = ?", (SPY_COST, user_id))
+
+        reveal_at = now + SPY_DURATION_SECONDS
+        status = 'intercepted' if is_intercepted else 'active'
+        await db.execute(
+            "INSERT INTO spies (user_id, target_house_id, sent_at, reveal_at, status) VALUES (?, ?, ?, ?, ?)",
+            (user_id, target_house_id, now, reveal_at, status)
+        )
+        await db.commit()
+
+    if is_intercepted:
+        return False, "🩸 **DUSHMAN QON JODUGARI QOPQONI!**\nSiz yuborgan josus dushman qal'asidagi Qon Jodugari tomonidan sezilib qoldi va qo'lga olinib qatl etildi! Hech qanday ma'lumot olinmadi.", {"intercepted": True}
+
+    return True, f"🕵️ Josus muvaffaqiyatli dushman qal'asiga kiritildi! (-{SPY_COST} 🪙)\n30 daqiqadan so'ng dushman resurslari haqida to'liq hisobot taqdim etiladi.", {"reveal_at": reveal_at}
+
+async def _fetch_house_spy_report_data(house_id: int, owner_id: int) -> Dict[str, Any]:
+    user = await get_user(owner_id)
+    army = await get_user_army(owner_id) or {}
+    beasts = await get_user_beasts(owner_id) or []
+    power_info = await calculate_player_power(owner_id)
+    house = await get_house_by_id(house_id)
+
+    dragons = [b for b in beasts if b.get("beast_type") == "dragon"]
+    spiders = [b for b in beasts if b.get("beast_type") == "spider"]
+
+    return {
+        "house_name": house.get("name") if house else f"#{house_id}",
+        "house_id": house_id,
+        "owner_id": owner_id,
+        "owner_name": user.get("custom_name") or user.get("full_name") or f"Lord #{owner_id}",
+        "owner_username": user.get("username"),
+        "gold": user.get("gold", 0),
+        "valyrian_steel": user.get("valyrian_steel", 0),
+        "total_power": power_info.get("total_active_power", 0),
+        "soldiers": army.get("soldiers", 0),
+        "archers": army.get("archers", 0),
+        "cavalry": army.get("cavalry", 0),
+        "chakra": army.get("chakra", 0),
+        "gold_cloaks": army.get("gold_cloaks", 0),
+        "unsullied": army.get("unsullied", 0),
+        "faceless": army.get("faceless", 0),
+        "shadow": army.get("shadow", 0),
+        "poison": army.get("poison", 0),
+        "dragons_count": len(dragons),
+        "dragons_active": len([d for d in dragons if d.get("frozen_until", 0) <= int(time.time())]),
+        "spiders_count": len(spiders),
+        "castle_level": house.get("castle_level") or 0
+    }
+
+async def get_user_spies(user_id: int) -> List[Dict[str, Any]]:
+    now = int(time.time())
+    async with get_db_connection() as db:
+        cursor = await db.execute("""
+            SELECT s.*, h.name as house_name, h.region, h.owner_id as target_owner_id
+            FROM spies s
+            LEFT JOIN houses h ON h.id = s.target_house_id
+            WHERE s.user_id = ?
+            ORDER BY s.id DESC LIMIT 10
+        """, (user_id,))
+        rows = await cursor.fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            if d["status"] == "active" and now >= d["reveal_at"]:
+                d["is_ready"] = True
+            else:
+                d["is_ready"] = False
+            result.append(d)
+        return result
+
+async def get_spy_report_details(spy_id: int, user_id: int) -> Optional[Dict[str, Any]]:
+    now = int(time.time())
+    async with get_db_connection() as db:
+        cursor = await db.execute("SELECT * FROM spies WHERE id = ? AND user_id = ?", (spy_id, user_id))
+        row = await cursor.fetchone()
+        if not row:
+            return None
+
+        spy = dict(row)
+        if spy["status"] == "intercepted":
+            return {"status": "intercepted"}
+
+        if now < spy["reveal_at"]:
+            left = spy["reveal_at"] - now
+            return {"status": "pending", "left_seconds": left}
+
+        if spy["status"] == "active":
+            await db.execute("UPDATE spies SET status = 'completed' WHERE id = ?", (spy_id,))
+            await db.commit()
+
+        cursor = await db.execute("SELECT owner_id FROM houses WHERE id = ?", (spy["target_house_id"],))
+        h_row = await cursor.fetchone()
+        if not h_row or not h_row["owner_id"]:
+            return {"status": "abandoned"}
+
+    data = await _fetch_house_spy_report_data(spy["target_house_id"], h_row["owner_id"])
+    data["status"] = "completed"
+    return data
+
+async def get_house_spy_status(user_id: int, house_id: int) -> Optional[Dict[str, Any]]:
+    now = int(time.time())
+    async with get_db_connection() as db:
+        cursor = await db.execute("""
+            SELECT * FROM spies 
+            WHERE user_id = ? AND target_house_id = ?
+            ORDER BY id DESC LIMIT 1
+        """, (user_id, house_id))
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        spy = dict(row)
+        if spy["status"] == "intercepted":
+            return {"status": "intercepted"}
+        if spy["status"] == "active":
+            if now >= spy["reveal_at"]:
+                return {"status": "ready", "spy_id": spy["id"]}
+            else:
+                left_min = max(1, (spy["reveal_at"] - now) // 60)
+                return {"status": "pending", "left_minutes": left_min, "spy_id": spy["id"]}
+        if spy["status"] == "completed":
+            if now - spy["reveal_at"] < 24 * 3600:
+                return {"status": "completed", "spy_id": spy["id"]}
+    return None
+
+
 

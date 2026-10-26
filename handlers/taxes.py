@@ -2,7 +2,7 @@ import time
 from aiogram import Router, F, types
 from database import (
     get_user_house, get_vassals, collect_vassal_taxes,
-    get_user
+    get_user, free_vassal_by_overlord, get_house_by_id
 )
 from keyboards import taxes_kb
 from config import escape_md
@@ -60,9 +60,10 @@ async def show_taxes_menu(message: types.Message):
                 f"👑 **Sizning bo'ysundirilgan vassallaringiz ({len(vassals)} ta):**\n"
                 f"{vassals_info}\n\n"
                 f"📌 *Qoida: Har bir vassaldan har 24 soatda bir marta 20 🪙 soliq yig'ib olinadi.*\n"
+                f"🕊 *Vassalni ozod qilish uchun quyidagi tugmalardan birini bosing.*\n\n"
                 f"{timer_status}"
             )
-            kb = taxes_kb()
+            kb = taxes_kb(vassals)
         else:
             vassal_desc = (
                 "😴 **Sizda hozircha birorta ham vassal yo'q.**\n"
@@ -92,3 +93,27 @@ async def callback_collect_taxes(callback: types.CallbackQuery):
         await callback.answer("Soliqlar xazinaga qo'shildi! 🪙", show_alert=True)
     else:
         await callback.answer(msg, show_alert=True)
+
+@router.callback_query(F.data.startswith("free_vassal:"))
+async def callback_free_vassal(callback: types.CallbackQuery):
+    house_id = int(callback.data.split(":")[1])
+    user_id = callback.from_user.id
+    success, msg = await free_vassal_by_overlord(user_id, house_id)
+    if not success:
+        await callback.answer(msg, show_alert=True)
+        return
+
+    # Inform freed vassal if possible
+    house = await get_house_by_id(house_id)
+    if house and house.get("owner_id"):
+        try:
+            await callback.bot.send_message(
+                house["owner_id"],
+                f"🕊 **XUSHXABAR! SIZ OZOD QILINDINGIZ!**\n\nSizning Lordimiz sizni vassallik qaramligidan ozod qildi! Endi xonadoningiz mustaqil!",
+                parse_mode="Markdown"
+            )
+        except Exception:
+            pass
+
+    await callback.message.edit_text(msg, parse_mode="Markdown")
+    await callback.answer("Vassal ozod qilindi! 🕊", show_alert=True)

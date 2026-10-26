@@ -36,7 +36,9 @@ async def show_green_bank_main(message: types.Message):
         "3. **Valeriya Qudrati** — 70,000 so'm\n"
         "   └ 15,000 🪙 + 1,500 Benuqson 🛡 + 3 Valeriya Po'lati ⚔️ + 25 Yuzsiz 🥷 + 15 Soya 👣 + 35 Zahar 🧪 + 1,000 Chakra ⚙️\n"
         "4. **Oliy Hukmdor Xazinasi** — 120,000 so'm\n"
-        "   └ 35,000 🪙 + 4,000 Benuqson 🛡 + 6 Valeriya Po'lati ⚔️ + 60 Yuzsiz 🥷 + 40 Soya 👣 + 80 Zahar 🧪 + 2,500 Chakra ⚙️\n\n"
+        "   └ 35,000 🪙 + 4,000 Benuqson 🛡 + 6 Valeriya Po'lati ⚔️ + 60 Yuzsiz 🥷 + 40 Soya 👣 + 80 Zahar 🧪 + 2,500 Chakra ⚙️\n"
+        "5. **To'rt Jodugar Paketi (Witches Pack)** — 17,000 so'm\n"
+        "   └ Qizil 👩‍🦰 + Qon 🩸 + Suv 🧙 + Soya 🔮 Jodugarlari + 2,000 🪙 Bonus Oltin\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "Batafsil ma'lumot va to'lov uchun paketni tanlang:"
     )
