@@ -1,8 +1,12 @@
+import os
+import shutil
 import logging
+from datetime import datetime
 from aiogram import Router, F, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import FSInputFile
 from config import ADMIN_IDS, escape_md
 from database import (
     get_all_users, admin_set_gold, admin_free_house,
@@ -10,19 +14,28 @@ from database import (
     admin_give_gold_add, get_houses, get_db_connection,
     admin_restart_game, set_user_blocked, admin_transfer_house,
     approve_donation_request, reject_donation_request, get_user,
-    distribute_weekly_tournament_rewards
+    distribute_weekly_tournament_rewards,
+    get_war_status, toggle_war_status, set_war_status,
+    is_bot_admin, is_super_admin, get_all_bot_admins,
+    add_bot_admin, remove_bot_admin
 )
 from keyboards import (
     admin_panel_kb, admin_restart_confirm_kb,
-    admin_unfreeze_options_kb, admin_cancel_kb
+    admin_unfreeze_options_kb, admin_cancel_kb,
+    admin_manage_admins_kb, main_menu_keyboard
 )
 
 logger = logging.getLogger(__name__)
 
 router = Router()
 
-def is_admin(user_id: int) -> bool:
-    return user_id in ADMIN_IDS
+async def is_admin(user_id: int) -> bool:
+    return await is_bot_admin(user_id)
+
+async def get_admin_panel_kb(user_id: int):
+    is_war = await get_war_status()
+    is_super = is_super_admin(user_id)
+    return admin_panel_kb(is_war_open=is_war, is_super_admin=is_super)
 
 class AdminStates(StatesGroup):
     waiting_for_broadcast = State()
@@ -30,57 +43,71 @@ class AdminStates(StatesGroup):
     waiting_for_unfreeze_user = State()
     waiting_for_transfer_house = State()
     waiting_for_clear_house = State()
+    waiting_for_add_admin = State()
+    waiting_for_db_file = State()
 
 @router.message(F.text == "👑 Admin paneli")
 @router.message(Command("admin"))
 async def show_admin_panel(message: types.Message, state: FSMContext = None):
-    if not is_admin(message.from_user.id):
+    if not await is_admin(message.from_user.id):
         return
 
     if state:
         await state.clear()
 
+    is_war = await get_war_status()
+    war_badge = "🟢 **Ochiq**" if is_war else "🔴 **Sulh davri**"
+    role_badge = "👑 **Bosh Admin**" if is_super_admin(message.from_user.id) else "🛡 **Admin**"
+
     text = (
-        "👑 **QADIMGI VALERIYA — BOSH ADMIN BOSHQARUV PANELI**\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "Boshqaruv tugmalari orqali istalgan amaliyotni bajaring:\n\n"
-        "• 📢 **Xabar tarqatish:** Botdagi barcha o'yinchilarga e'lon yo'llash\n"
-        "• 💰 **Oltin berish:** O'yinchiga oltin o'rnatish yoki qo'shish\n"
-        "• ❄️ **Ajdarlarni muzdan chiqarish:** Barcha yoki bitta Lord ajdarlarini ochish\n"
-        "• 🔄 **Xonadonni ko'chirish:** O'yinchini boshqa xonadonga o'tkazish\n"
-        "• 🏠 **Xonadonni bo'shatish:** Xonadonni egasidan tozalash\n"
-        "• 📊 **Statistika:** Foydalanuvchilar, janglar va iqtisodiyot\n\n"
-        "Shuningdek, buyruqlar: `/givegold`, `/broadcast`, `/unfreeze`, `/transferhouse`, `/freehouse`."
+        f"👑 **QADIMGI VALERIYA — BOSHQARUV PANELI**\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"Maqomingiz: {role_badge}\n"
+        f"Urush holati: {war_badge}\n\n"
+        f"Boshqaruv tugmalari orqali istalgan amaliyotni bajaring:\n\n"
+        f"• ⚔️ **Urush holati:** Urushni ochish yoki sulh e'lon qilish\n"
+        f"• 📢 **Xabar tarqatish:** Botdagi barcha o'yinchilarga e'lon yo'llash\n"
+        f"• 💰 **Oltin berish:** O'yinchiga oltin qo'shish yoki belgilash\n"
+        f"• ❄️ **Ajdarlarni muzdan chiqarish:** Barcha yoki bitta Lord ajdarlarini ochish\n"
+        f"• 🔄 **Xonadonni ko'chirish / bo'shatish:** Xonadonlarni boshqarish\n"
+        f"• 💾 **Baza zaxirasi:** Bot ma'lumotlar bazasini yuklab olish yoki tiklash\n"
+        f"• 📊 **Statistika:** Foydalanuvchilar va janglar statistikasi"
     )
 
-    await message.answer(text, reply_markup=admin_panel_kb(), parse_mode="Markdown")
+    kb = await get_admin_panel_kb(message.from_user.id)
+    await message.answer(text, reply_markup=kb, parse_mode="Markdown")
 
 @router.callback_query(F.data == "admin_back")
 async def callback_admin_back(callback: types.CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         return
     await state.clear()
+    is_war = await get_war_status()
+    war_badge = "🟢 **Ochiq**" if is_war else "🔴 **Sulh davri**"
     text = (
-        "👑 **QADIMGI VALERIYA — BOSH ADMIN BOSHQARUV PANELI**\n"
+        "👑 **QADIMGI VALERIYA — BOSHQARUV PANELI**\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
+        f"Urush holati: {war_badge}\n\n"
         "Quyidagi boshqaruv tugmalaridan birini tanlang:"
     )
-    await callback.message.edit_text(text, reply_markup=admin_panel_kb(), parse_mode="Markdown")
+    kb = await get_admin_panel_kb(callback.from_user.id)
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
     await callback.answer()
 
 @router.callback_query(F.data == "admin_cancel")
 async def callback_admin_cancel(callback: types.CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         return
     await state.clear()
-    await callback.message.edit_text("✅ Amaliyot bekor qilindi.", reply_markup=admin_panel_kb(), parse_mode="Markdown")
+    kb = await get_admin_panel_kb(callback.from_user.id)
+    await callback.message.edit_text("✅ Amaliyot bekor qilindi.", reply_markup=kb, parse_mode="Markdown")
     await callback.answer("Bekor qilindi")
 
 # --- 1. XABAR TARQATISH (BROADCAST) ---
 
 @router.callback_query(F.data == "admin_broadcast")
 async def callback_admin_broadcast_start(callback: types.CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         return
     await state.set_state(AdminStates.waiting_for_broadcast)
     text = (
@@ -133,7 +160,7 @@ async def process_admin_broadcast(message: types.Message, state: FSMContext):
 
 @router.message(Command("broadcast"))
 async def cmd_broadcast(message: types.Message):
-    if not is_admin(message.from_user.id):
+    if not await is_admin(message.from_user.id):
         return
 
     text_to_send = message.text.replace("/broadcast", "").strip()
@@ -168,7 +195,7 @@ async def cmd_broadcast(message: types.Message):
 
 @router.callback_query(F.data == "admin_give_gold")
 async def callback_admin_give_gold_start(callback: types.CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         return
     await state.set_state(AdminStates.waiting_for_give_gold)
     text = (
@@ -218,7 +245,7 @@ async def process_admin_give_gold(message: types.Message, state: FSMContext):
 
 @router.message(Command("givegold"))
 async def cmd_givegold(message: types.Message):
-    if not is_admin(message.from_user.id):
+    if not await is_admin(message.from_user.id):
         return
 
     parts = message.text.split()
@@ -243,7 +270,7 @@ async def cmd_givegold(message: types.Message):
 
 @router.callback_query(F.data == "admin_unfreeze")
 async def callback_admin_unfreeze_menu(callback: types.CallbackQuery):
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         return
     text = (
         "❄️ **AJDARLARNI MUZDAN CHIQARISH:**\n\n"
@@ -256,7 +283,7 @@ async def callback_admin_unfreeze_menu(callback: types.CallbackQuery):
 
 @router.callback_query(F.data == "admin_unfreeze_all")
 async def callback_admin_unfreeze_all(callback: types.CallbackQuery):
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         return
     count = await admin_unfreeze_all_dragons()
     await callback.message.edit_text(
@@ -268,7 +295,7 @@ async def callback_admin_unfreeze_all(callback: types.CallbackQuery):
 
 @router.callback_query(F.data == "admin_unfreeze_single")
 async def callback_admin_unfreeze_single_start(callback: types.CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         return
     await state.set_state(AdminStates.waiting_for_unfreeze_user)
     text = (
@@ -303,7 +330,7 @@ async def process_admin_unfreeze_single(message: types.Message, state: FSMContex
 
 @router.message(Command("unfreeze"))
 async def cmd_unfreeze(message: types.Message):
-    if not is_admin(message.from_user.id):
+    if not await is_admin(message.from_user.id):
         return
 
     parts = message.text.split()
@@ -328,7 +355,7 @@ async def cmd_unfreeze(message: types.Message):
 
 @router.callback_query(F.data == "admin_transfer_house")
 async def callback_admin_transfer_house_start(callback: types.CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         return
     await state.set_state(AdminStates.waiting_for_transfer_house)
     text = (
@@ -378,7 +405,7 @@ async def process_admin_transfer_house(message: types.Message, state: FSMContext
 
 @router.message(Command("transferhouse"))
 async def cmd_transfer_house(message: types.Message):
-    if not is_admin(message.from_user.id):
+    if not await is_admin(message.from_user.id):
         return
 
     parts = message.text.split()
@@ -403,7 +430,7 @@ async def cmd_transfer_house(message: types.Message):
 
 @router.callback_query(F.data == "admin_clear_house")
 async def callback_admin_clear_house_start(callback: types.CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         return
     await state.set_state(AdminStates.waiting_for_clear_house)
     text = (
@@ -438,7 +465,7 @@ async def process_admin_clear_house(message: types.Message, state: FSMContext):
 
 @router.message(Command("freehouse"))
 async def cmd_freehouse(message: types.Message):
-    if not is_admin(message.from_user.id):
+    if not await is_admin(message.from_user.id):
         return
 
     parts = message.text.split()
@@ -459,7 +486,7 @@ async def cmd_freehouse(message: types.Message):
 
 @router.callback_query(F.data == "admin_stats")
 async def callback_admin_stats(callback: types.CallbackQuery):
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         return
 
     users = await get_all_users()
@@ -493,7 +520,8 @@ async def callback_admin_stats(callback: types.CallbackQuery):
 
 @router.callback_query(F.data == "admin_restart_prompt")
 async def callback_admin_restart_prompt(callback: types.CallbackQuery):
-    if not is_admin(callback.from_user.id):
+    if not is_super_admin(callback.from_user.id):
+        await callback.answer("O'yinni restart qilish faqat Bosh Admin uchun!", show_alert=True)
         return
 
     warn_text = (
@@ -512,15 +540,17 @@ async def callback_admin_restart_prompt(callback: types.CallbackQuery):
 
 @router.callback_query(F.data == "admin_cancel_restart")
 async def callback_admin_cancel_restart(callback: types.CallbackQuery):
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         return
 
-    await callback.message.edit_text("✅ Restart bekor qilindi.", reply_markup=admin_panel_kb(), parse_mode="Markdown")
+    kb = await get_admin_panel_kb(callback.from_user.id)
+    await callback.message.edit_text("✅ Restart bekor qilindi.", reply_markup=kb, parse_mode="Markdown")
     await callback.answer()
 
 @router.callback_query(F.data == "admin_do_restart")
 async def callback_admin_do_restart(callback: types.CallbackQuery):
-    if not is_admin(callback.from_user.id):
+    if not is_super_admin(callback.from_user.id):
+        await callback.answer("O'yinni restart qilish faqat Bosh Admin uchun!", show_alert=True)
         return
 
     await admin_restart_game()
@@ -531,12 +561,13 @@ async def callback_admin_do_restart(callback: types.CallbackQuery):
         "• Barcha armiyalar va janglar tarixi tozalandi.\n"
         "• O'yin noldan yangidan boshlandi!"
     )
-    await callback.message.edit_text(success_text, reply_markup=admin_panel_kb(), parse_mode="Markdown")
+    kb = await get_admin_panel_kb(callback.from_user.id)
+    await callback.message.edit_text(success_text, reply_markup=kb, parse_mode="Markdown")
     await callback.answer("O'yin muvaffaqiyatli restart qilindi!", show_alert=True)
 
 @router.message(Command("restartgame"))
 async def cmd_restartgame(message: types.Message):
-    if not is_admin(message.from_user.id):
+    if not is_super_admin(message.from_user.id):
         return
 
     warn_text = (
@@ -549,7 +580,7 @@ async def cmd_restartgame(message: types.Message):
 
 @router.message(Command("block"))
 async def cmd_block_user(message: types.Message):
-    if not is_admin(message.from_user.id):
+    if not await is_admin(message.from_user.id):
         return
 
     parts = message.text.split()
@@ -568,7 +599,7 @@ async def cmd_block_user(message: types.Message):
 
 @router.message(Command("unblock"))
 async def cmd_unblock_user(message: types.Message):
-    if not is_admin(message.from_user.id):
+    if not await is_admin(message.from_user.id):
         return
 
     parts = message.text.split()
@@ -589,7 +620,7 @@ async def cmd_unblock_user(message: types.Message):
 
 @router.callback_query(F.data.startswith("approve_don:"))
 async def callback_approve_donation(callback: types.CallbackQuery):
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         await callback.answer("Faqat admin uchun!", show_alert=True)
         return
 
@@ -628,7 +659,7 @@ async def callback_approve_donation(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("reject_don:"))
 async def callback_reject_donation(callback: types.CallbackQuery):
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         await callback.answer("Faqat admin uchun!", show_alert=True)
         return
 
@@ -663,7 +694,7 @@ async def callback_reject_donation(callback: types.CallbackQuery):
 
 @router.callback_query(F.data == "admin_distribute_tournament")
 async def callback_admin_distribute_tournament(callback: types.CallbackQuery):
-    if not is_admin(callback.from_user.id):
+    if not await is_admin(callback.from_user.id):
         await callback.answer("Faqat admin uchun!", show_alert=True)
         return
 
@@ -674,4 +705,212 @@ async def callback_admin_distribute_tournament(callback: types.CallbackQuery):
             f"🎁 **Haftalik Turnir Sovg'alari Tarqatildi!**\n\n{msg}",
             parse_mode="Markdown"
         )
+
+# --- 7. URUSH HOLATINI OCHISH / YOPISH ---
+
+@router.callback_query(F.data == "admin_toggle_war")
+async def callback_admin_toggle_war(callback: types.CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("Faqat admin uchun!", show_alert=True)
+        return
+
+    new_st = await toggle_war_status()
+    st_text = "🟢 **URUSH OCHIQ** (Lordlar bir-biriga hujum qilishi mumkin)" if new_st else "🔴 **SULH DAVRI** (Barcha janglar va hujumlar to'xtatildi)"
+    await callback.answer(f"Urush holati: {'Ochiq' if new_st else 'Sulh davri'}", show_alert=True)
+
+    text = (
+        "👑 **QADIMGI VALERIYA — BOSHQARUV PANELI**\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        f"⚡️ Joriy Urush Holati: {st_text}\n\n"
+        "Quyidagi boshqaruv tugmalaridan birini tanlang:"
+    )
+    kb = await get_admin_panel_kb(callback.from_user.id)
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+
+# --- 8. ADMINLARNI BOSHQARISH (KATTA ADMIN UCHUN) ---
+
+@router.callback_query(F.data == "admin_manage_admins")
+async def callback_admin_manage_admins(callback: types.CallbackQuery):
+    if not is_super_admin(callback.from_user.id):
+        await callback.answer("Bu bo'lim faqat Bosh Admin uchun!", show_alert=True)
+        return
+
+    admins = await get_all_bot_admins()
+    text = (
+        "👑 **BOT ADMINLARINI BOSHQARISH (KATTA ADMIN)**\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "Siz botga yangi admin tayinlashingiz yoki mavjud adminlarni ro'yxatdan o'chirishingiz mumkin.\n\n"
+        "📋 **Joriy adminlar ro'yxati:**\n"
+    )
+    for adm in admins:
+        role_label = "👑 Bosh Admin" if adm.get("role") == "super_admin" else "🛡 Admin"
+        u_str = f" (@{adm['username']})" if adm.get("username") else ""
+        text += f"• {role_label}: **{adm['full_name']}**{u_str} — ID: `{adm['telegram_id']}`\n"
+
+    kb = admin_manage_admins_kb(admins)
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("admin_del_admin:"))
+async def callback_admin_del_admin(callback: types.CallbackQuery):
+    if not is_super_admin(callback.from_user.id):
+        await callback.answer("Faqat Bosh Admin o'chira oladi!", show_alert=True)
+        return
+
+    target_id = int(callback.data.split(":")[1])
+    success, msg = await remove_bot_admin(target_id)
+    await callback.answer(msg, show_alert=True)
+
+    admins = await get_all_bot_admins()
+    text = (
+        "👑 **BOT ADMINLARINI BOSHQARISH (KATTA ADMIN)**\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        f"{msg}\n\n"
+        "📋 **Joriy adminlar ro'yxati:**\n"
+    )
+    for adm in admins:
+        role_label = "👑 Bosh Admin" if adm.get("role") == "super_admin" else "🛡 Admin"
+        u_str = f" (@{adm['username']})" if adm.get("username") else ""
+        text += f"• {role_label}: **{adm['full_name']}**{u_str} — ID: `{adm['telegram_id']}`\n"
+
+    kb = admin_manage_admins_kb(admins)
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+
+@router.callback_query(F.data == "admin_add_admin_prompt")
+async def callback_admin_add_prompt(callback: types.CallbackQuery, state: FSMContext):
+    if not is_super_admin(callback.from_user.id):
+        await callback.answer("Faqat Bosh Admin tayinlay oladi!", show_alert=True)
+        return
+
+    await state.set_state(AdminStates.waiting_for_add_admin)
+    text = (
+        "➕ **YANGI ADMIN TAYINLASH:**\n\n"
+        "Admin qilmoqchi bo'lgan o'yinchining **Telegram ID** raqamini yuboring:\n"
+        "(Masalan: `7009689119`)\n\n"
+        "*(Eslatma: Foydalanuvchi botga avval kamida 1 marta /start bosgan bo'lishi kerak)*\n\n"
+        "🔙 *Bekor qilish uchun /cancel deb yozing yoki tugmani bosing.*"
+    )
+    await callback.message.edit_text(text, reply_markup=admin_cancel_kb(), parse_mode="Markdown")
+    await callback.answer()
+
+@router.message(AdminStates.waiting_for_add_admin)
+async def process_admin_add_admin(message: types.Message, state: FSMContext):
+    if not is_super_admin(message.from_user.id):
+        return
+    if message.text and message.text.strip().lower() == "/cancel":
+        await state.clear()
+        kb = await get_admin_panel_kb(message.from_user.id)
+        await message.answer("Admin tayinlash bekor qilindi.", reply_markup=kb)
+        return
+
+    try:
+        target_id = int(message.text.strip())
+    except ValueError:
+        await message.answer("❌ Noto'g'ri format! Faqat Telegram ID raqamini kiriting. Masalan: `7009689119`")
+        return
+
+    success, msg = await add_bot_admin(target_id, message.from_user.id)
+    await state.clear()
+    kb = await get_admin_panel_kb(message.from_user.id)
+    if success:
+        await message.answer(msg, reply_markup=kb, parse_mode="Markdown")
+        try:
+            await message.bot.send_message(
+                target_id,
+                "👑 **TABRIKLAYMIZ!**\nSiz Katta Admin tomonidan Valeriya Boshqaruv Admini etib tayinlandingiz! /admin buyrug'i orqali boshqaruv paneliga kirishingiz mumkin.",
+                reply_markup=main_menu_keyboard(target_id, is_admin=True)
+            )
+        except Exception:
+            pass
+    else:
+        await message.answer(f"❌ {msg}", reply_markup=kb)
+
+# --- 9. BAZA ZAXIRASINI YUKLAB OLISH VA TIKLASH ---
+
+@router.callback_query(F.data == "admin_backup_db")
+async def callback_admin_backup_db(callback: types.CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("Faqat admin uchun!", show_alert=True)
+        return
+
+    db_path = "valyria.db"
+    if not os.path.exists(db_path):
+        await callback.answer("valyria.db fayli topilmadi!", show_alert=True)
+        return
+
+    file_size_kb = round(os.path.getsize(db_path) / 1024, 2)
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    caption = (
+        f"💾 **VALERIYA MA'LUMOTLAR BAZASI ZAXIRASI (BACKUP)**\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📅 Sana: `{now_str}`\n"
+        f"📦 Hajmi: `{file_size_kb} KB`\n\n"
+        f"Ushbu faylda barcha o'yinchilar, xonadonlar, armiyalar va barcha sozlamalar saqlangan."
+    )
+
+    await callback.answer("Baza fayli yuborilmoqda...")
+    try:
+        doc = FSInputFile(db_path, filename=f"valyria_backup_{int(datetime.now().timestamp())}.db")
+        await callback.message.answer_document(doc, caption=caption, parse_mode="Markdown")
+    except Exception as e:
+        await callback.message.answer(f"❌ Faylni yuborishda xatolik: {e}")
+
+@router.callback_query(F.data == "admin_restore_db")
+async def callback_admin_restore_db(callback: types.CallbackQuery, state: FSMContext):
+    if not is_super_admin(callback.from_user.id):
+        await callback.answer("Bazani tiklash faqat Bosh Admin uchun ruxsat etilgan!", show_alert=True)
+        return
+
+    await state.set_state(AdminStates.waiting_for_db_file)
+    text = (
+        "📥 **BAZANI FAYLDAN TIKLASH (DATABASE RESTORE):**\n\n"
+        "Tiklamoqchi bo'lgan `.db` yoki `.sqlite` ma'lumotlar bazasi faylini botga **Fayl (Hujjat/Document)** ko'rinishida yuboring.\n\n"
+        "⚠️ *Ogohlantirish: Mavjud bazaning zaxira nusxasi (valyria.db.bak) yaratiladi va yangi fayl o'rniga qo'yiladi!*"
+        "\n\n🔙 *Bekor qilish uchun /cancel deb yozing.*"
+    )
+    await callback.message.edit_text(text, reply_markup=admin_cancel_kb(), parse_mode="Markdown")
+    await callback.answer()
+
+@router.message(AdminStates.waiting_for_db_file)
+async def process_admin_db_restore_file(message: types.Message, state: FSMContext):
+    if not is_super_admin(message.from_user.id):
+        return
+    if message.text and message.text.strip().lower() == "/cancel":
+        await state.clear()
+        kb = await get_admin_panel_kb(message.from_user.id)
+        await message.answer("Bazani tiklash bekor qilindi.", reply_markup=kb)
+        return
+
+    if not message.document:
+        await message.answer("❌ Iltimos, `.db` kengaytmali ma'lumotlar bazasi faylini yuboring!")
+        return
+
+    doc = message.document
+    if not (doc.file_name.endswith(".db") or doc.file_name.endswith(".sqlite") or doc.file_name.endswith(".sqlite3")):
+        await message.answer("❌ Faqat `.db` yoki `.sqlite` fayllari qabul qilinadi!")
+        return
+
+    try:
+        # 1. Zaxira nusxa yaratish
+        if os.path.exists("valyria.db"):
+            shutil.copyfile("valyria.db", "valyria.db.bak")
+
+        # 2. Yangi faylni yuklab olish
+        file = await message.bot.get_file(doc.file_id)
+        await message.bot.download_file(file.file_path, "valyria.db")
+
+        await state.clear()
+        kb = await get_admin_panel_kb(message.from_user.id)
+        await message.answer(
+            "✅ **MA'LUMOTLAR BAZASI MUVAFFAQIYATLI TIKLANDI!**\n\n"
+            f"Fayl: `{doc.file_name}`\n"
+            "Avvalgi baza `valyria.db.bak` nomli zaxiraga olindi.",
+            reply_markup=kb,
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        await state.clear()
+        kb = await get_admin_panel_kb(message.from_user.id)
+        await message.answer(f"❌ Bazani tiklashda xatolik yuz berdi: {e}", reply_markup=kb)
 

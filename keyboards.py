@@ -9,7 +9,7 @@ from config import (
     LOAN_PACKAGES
 )
 
-def main_menu_keyboard(user_id: int) -> ReplyKeyboardMarkup:
+def main_menu_keyboard(user_id: int, is_admin: bool = False) -> ReplyKeyboardMarkup:
     buttons = [
         [KeyboardButton(text="🌋 Oila tanlash"), KeyboardButton(text="👤 Profil")],
         [KeyboardButton(text="🛕 Uylar"), KeyboardButton(text="🗺 Valeriya Xaritasi")],
@@ -21,7 +21,7 @@ def main_menu_keyboard(user_id: int) -> ReplyKeyboardMarkup:
         [KeyboardButton(text="🛘 Hududiy topshiriqlar"), KeyboardButton(text="⛓💥 Ritserlar Baxsi")],
         [KeyboardButton(text="🏴‍☠️ Westerosni Talon-Taroj")]
     ]
-    if user_id in ADMIN_IDS:
+    if is_admin or user_id in ADMIN_IDS:
         buttons.append([KeyboardButton(text="👑 Admin paneli")])
 
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
@@ -248,10 +248,112 @@ def battle_army_select_kb(
     ])
 
     rows.append([
-        InlineKeyboardButton(text="🚀 Jangga otlanish! (8 daqiqa)", callback_data=f"bt_confirm_march:{target_house_id}:{call_id}")
+        InlineKeyboardButton(text="🚀 Jangga otlanish! (7 daqiqa)", callback_data=f"bt_confirm_march:{target_house_id}:{call_id}")
     ])
     rows.append([
         InlineKeyboardButton(text="🔙 Chekinish (Bekor qilish)", callback_data="bt_cancel")
+    ])
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+def defense_army_select_kb(
+    battle_id: int,
+    army: dict,
+    selected: dict,
+    active_dragons: list = None,
+    include_dragons: bool = True,
+    active_spiders: list = None,
+    include_spiders: bool = True,
+    valyrian_steel: int = 0,
+    include_valyrian: bool = True
+) -> InlineKeyboardMarkup:
+    rows = []
+
+    sold_avail = army.get("soldiers", 0)
+    sold_sel = selected.get("soldiers", 0)
+    rows.append([InlineKeyboardButton(text=f"🗡 Askar: {sold_sel}/{sold_avail}", callback_data="noop")])
+    rows.append([
+        InlineKeyboardButton(text="+10", callback_data=f"def_adj:{battle_id}:soldiers:+10"),
+        InlineKeyboardButton(text="+50", callback_data=f"def_adj:{battle_id}:soldiers:+50"),
+        InlineKeyboardButton(text="Hammasi", callback_data=f"def_adj:{battle_id}:soldiers:all"),
+        InlineKeyboardButton(text="0", callback_data=f"def_adj:{battle_id}:soldiers:zero")
+    ])
+
+    arch_avail = army.get("archers", 0)
+    arch_sel = selected.get("archers", 0)
+    if arch_avail > 0:
+        rows.append([InlineKeyboardButton(text=f"🏹 Kamonchi: {arch_sel}/{arch_avail}", callback_data="noop")])
+        rows.append([
+            InlineKeyboardButton(text="+5", callback_data=f"def_adj:{battle_id}:archers:+5"),
+            InlineKeyboardButton(text="+20", callback_data=f"def_adj:{battle_id}:archers:+20"),
+            InlineKeyboardButton(text="Hammasi", callback_data=f"def_adj:{battle_id}:archers:all"),
+            InlineKeyboardButton(text="0", callback_data=f"def_adj:{battle_id}:archers:zero")
+        ])
+
+    cav_avail = army.get("cavalry", 0)
+    cav_sel = selected.get("cavalry", 0)
+    if cav_avail > 0:
+        rows.append([InlineKeyboardButton(text=f"🐎 Otliq: {cav_sel}/{cav_avail}", callback_data="noop")])
+        rows.append([
+            InlineKeyboardButton(text="+2", callback_data=f"def_adj:{battle_id}:cavalry:+2"),
+            InlineKeyboardButton(text="+10", callback_data=f"def_adj:{battle_id}:cavalry:+10"),
+            InlineKeyboardButton(text="Hammasi", callback_data=f"def_adj:{battle_id}:cavalry:all"),
+            InlineKeyboardButton(text="0", callback_data=f"def_adj:{battle_id}:cavalry:zero")
+        ])
+
+    chk_avail = army.get("chakra", 0)
+    chk_sel = selected.get("chakra", 0)
+    if chk_avail > 0:
+        rows.append([InlineKeyboardButton(text=f"⚙️ Chakra: {chk_sel}/{chk_avail}", callback_data="noop")])
+        rows.append([
+            InlineKeyboardButton(text="+10", callback_data=f"def_adj:{battle_id}:chakra:+10"),
+            InlineKeyboardButton(text="+50", callback_data=f"def_adj:{battle_id}:chakra:+50"),
+            InlineKeyboardButton(text="Hammasi", callback_data=f"def_adj:{battle_id}:chakra:all"),
+            InlineKeyboardButton(text="0", callback_data=f"def_adj:{battle_id}:chakra:zero")
+        ])
+
+    gc_avail = army.get("gold_cloaks", 0)
+    gc_sel = selected.get("gold_cloaks", 0)
+    if gc_avail > 0:
+        rows.append([InlineKeyboardButton(text=f"🟡 Tilla Plash: {gc_sel}/{gc_avail}", callback_data="noop")])
+        rows.append([
+            InlineKeyboardButton(text="+5", callback_data=f"def_adj:{battle_id}:gold_cloaks:+5"),
+            InlineKeyboardButton(text="+20", callback_data=f"def_adj:{battle_id}:gold_cloaks:+20"),
+            InlineKeyboardButton(text="Hammasi", callback_data=f"def_adj:{battle_id}:gold_cloaks:all"),
+            InlineKeyboardButton(text="0", callback_data=f"def_adj:{battle_id}:gold_cloaks:zero")
+        ])
+
+    uns_avail = army.get("unsullied", 0)
+    uns_sel = selected.get("unsullied", 0)
+    if uns_avail > 0:
+        rows.append([InlineKeyboardButton(text=f"🛡 Benuqson: {uns_sel}/{uns_avail}", callback_data="noop")])
+        rows.append([
+            InlineKeyboardButton(text="+10", callback_data=f"def_adj:{battle_id}:unsullied:+10"),
+            InlineKeyboardButton(text="+50", callback_data=f"def_adj:{battle_id}:unsullied:+50"),
+            InlineKeyboardButton(text="Hammasi", callback_data=f"def_adj:{battle_id}:unsullied:all"),
+            InlineKeyboardButton(text="0", callback_data=f"def_adj:{battle_id}:unsullied:zero")
+        ])
+
+    if valyrian_steel > 0:
+        v_status = "✅ Valeriya po'lati safarbar" if include_valyrian else "❌ Qal'ada qoldirilgan"
+        rows.append([InlineKeyboardButton(text=f"⚔️ {v_status}", callback_data=f"def_toggle:{battle_id}:valyrian")])
+
+    dragons_cnt = len(active_dragons) if active_dragons else 0
+    if dragons_cnt > 0:
+        d_status = f"✅ Ajdarlar ({dragons_cnt} ta) safarbar" if include_dragons else "❌ Qal'ada qoldirilgan"
+        rows.append([InlineKeyboardButton(text=f"🐲 {d_status}", callback_data=f"def_toggle:{battle_id}:dragons")])
+
+    spiders_cnt = len(active_spiders) if active_spiders else 0
+    if spiders_cnt > 0:
+        s_status = f"✅ O'rgamchaklar ({spiders_cnt} ta) safarbar" if include_spiders else "❌ Qal'ada qoldirilgan"
+        rows.append([InlineKeyboardButton(text=f"🕷 {s_status}", callback_data=f"def_toggle:{battle_id}:spiders")])
+
+    rows.append([
+        InlineKeyboardButton(text="🛡 Hammasini safarbar etish (100%)", callback_data=f"def_preset:{battle_id}:all"),
+        InlineKeyboardButton(text="🔄 Tozalash (0)", callback_data=f"def_preset:{battle_id}:zero")
+    ])
+    rows.append([
+        InlineKeyboardButton(text="🛡 MUDOFAANI TASDIQLASH! ⚔️", callback_data=f"def_confirm:{battle_id}")
     ])
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -442,17 +544,42 @@ def taxes_kb(vassals: Optional[List[Dict[str, Any]]] = None) -> InlineKeyboardMa
             rows.append([InlineKeyboardButton(text=btn_txt, callback_data=f"free_vassal:{v['id']}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
-def admin_panel_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
+def admin_panel_kb(is_war_open: bool = True, is_super_admin: bool = False) -> InlineKeyboardMarkup:
+    war_text = "⚔️ Urush: 🟢 Ochiq (Jangga ruxsat)" if is_war_open else "⚔️ Urush: 🔴 Sulh davri (To'xtatilgan)"
+    buttons = [
+        [InlineKeyboardButton(text=war_text, callback_data="admin_toggle_war")],
         [InlineKeyboardButton(text="📢 Barchaga xabar tarqatish", callback_data="admin_broadcast")],
         [InlineKeyboardButton(text="💰 O'yinchiga oltin berish", callback_data="admin_give_gold")],
         [InlineKeyboardButton(text="❄️ Ajdarlarni muzdan chiqarish", callback_data="admin_unfreeze")],
         [InlineKeyboardButton(text="🔄 Xonadonni ko'chirish", callback_data="admin_transfer_house")],
         [InlineKeyboardButton(text="🏠 Xonadonni bo'shatish", callback_data="admin_clear_house")],
         [InlineKeyboardButton(text="🎁 Turnir haftalik sovg'alarini tarqatish", callback_data="admin_distribute_tournament")],
-        [InlineKeyboardButton(text="📊 To'liq statistika", callback_data="admin_stats")],
-        [InlineKeyboardButton(text="⚠️ O'yinni Restart qilish (Reset)", callback_data="admin_restart_prompt")]
-    ])
+        [InlineKeyboardButton(text="💾 Baza zaxirasini yuklab olish (.db)", callback_data="admin_backup_db")],
+        [InlineKeyboardButton(text="📥 Bazani fayldan tiklash", callback_data="admin_restore_db")],
+        [InlineKeyboardButton(text="📊 To'liq statistika", callback_data="admin_stats")]
+    ]
+    if is_super_admin:
+        buttons.insert(1, [InlineKeyboardButton(text="👑 Adminlarni boshqarish", callback_data="admin_manage_admins")])
+    buttons.append([InlineKeyboardButton(text="⚠️ O'yinni Restart qilish (Reset)", callback_data="admin_restart_prompt")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def admin_manage_admins_kb(admins: List[Dict[str, Any]]) -> InlineKeyboardMarkup:
+    rows = []
+    for adm in admins:
+        name = adm.get("full_name") or f"ID {adm['telegram_id']}"
+        u_str = f" (@{adm['username']})" if adm.get("username") else ""
+        if adm.get("role") == "super_admin":
+            btn_txt = f"👑 {name}{u_str} (Bosh Admin)"
+            rows.append([InlineKeyboardButton(text=btn_txt, callback_data="noop")])
+        else:
+            btn_txt = f"🛡 {name}{u_str}"
+            rows.append([
+                InlineKeyboardButton(text=btn_txt, callback_data="noop"),
+                InlineKeyboardButton(text="❌ O'chirish", callback_data=f"admin_del_admin:{adm['telegram_id']}")
+            ])
+    rows.append([InlineKeyboardButton(text="➕ Yangi admin tayinlash", callback_data="admin_add_admin_prompt")])
+    rows.append([InlineKeyboardButton(text="🔙 Admin paneliga qaytish", callback_data="admin_back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def admin_unfreeze_options_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[

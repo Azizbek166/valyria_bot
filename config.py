@@ -290,8 +290,8 @@ WESTEROS_GLOBAL_COOLDOWN = 6 * 3600
 SPY_COST = 300
 SPY_DURATION_SECONDS = 30 * 60
 
-# Jang davomiyligi (8 daqiqa = 480 soniya)
-BATTLE_DURATION_SECONDS = 8 * 60
+# Jang davomiyligi (7 daqiqa = 420 soniya)
+BATTLE_DURATION_SECONDS = 7 * 60
 
 # 5 ta Asosiy Hududlar
 REGIONS = {

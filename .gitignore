@@ -3,8 +3,6 @@ __pycache__/
 *.pyo
 *.pyd
 .env
-*.db
-*.sqlite3
 test_*.py
 .idea/
 .vscode/

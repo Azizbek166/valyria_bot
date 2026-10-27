@@ -13,7 +13,7 @@ from config import (
     DONATE_PACKAGES, CHAKRA_DAILY_LIMIT, LOAN_PACKAGES,
     BATTLE_DURATION_SECONDS, WESTEROS_TARGETS,
     SPIDER_FREEZE_SECONDS, WESTEROS_GLOBAL_COOLDOWN,
-    SPY_COST, SPY_DURATION_SECONDS
+    SPY_COST, SPY_DURATION_SECONDS, ADMIN_IDS
 )
 
 @asynccontextmanager
@@ -252,18 +252,44 @@ async def init_db():
             )
         """)
 
-        # Faol janglar (Active Battles - 8 daqiqalik janglar) jadvali
+        # Faol janglar (Active Battles - 7 daqiqalik janglar) jadvali
         await db.execute("""
             CREATE TABLE IF NOT EXISTS active_battles (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 attacker_id INTEGER NOT NULL,
                 defender_house_id INTEGER NOT NULL,
                 troops_json TEXT NOT NULL,
+                defender_troops_json TEXT DEFAULT NULL,
                 start_time INTEGER NOT NULL,
                 end_time INTEGER NOT NULL,
                 call_id INTEGER DEFAULT 0,
                 status TEXT DEFAULT 'marching',
                 created_at INTEGER
+            )
+        """)
+
+        # Active battles migratsiyasi
+        cursor = await db.execute("PRAGMA table_info(active_battles)")
+        ab_cols = [row["name"] for row in await cursor.fetchall()]
+        if "defender_troops_json" not in ab_cols:
+            await db.execute("ALTER TABLE active_battles ADD COLUMN defender_troops_json TEXT DEFAULT NULL")
+
+        # Global sozlamalar jadvali (Urush holati va boshqalar)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS global_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
+        await db.execute("INSERT OR IGNORE INTO global_settings (key, value) VALUES ('war_status', 'open')")
+
+        # Bot adminlari jadvali (Katta admin tayinlagan adminlar)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS bot_admins (
+                telegram_id INTEGER PRIMARY KEY,
+                added_by INTEGER,
+                added_at INTEGER,
+                role TEXT DEFAULT 'admin'
             )
         """)
 
@@ -838,6 +864,10 @@ async def get_user_active_battle(user_id: int) -> Optional[Dict[str, Any]]:
             data["troops"] = json.loads(data["troops_json"])
         except Exception:
             data["troops"] = {}
+        try:
+            data["defender_troops"] = json.loads(data["defender_troops_json"]) if data.get("defender_troops_json") else None
+        except Exception:
+            data["defender_troops"] = None
         data["left_seconds"] = max(0, data["end_time"] - now)
         data["is_attacker"] = (data["attacker_id"] == user_id)
         data["ready"] = (now >= data["end_time"])
@@ -864,9 +894,86 @@ async def get_battle_by_id(battle_id: int) -> Optional[Dict[str, Any]]:
             data["troops"] = json.loads(data["troops_json"])
         except Exception:
             data["troops"] = {}
+        try:
+            data["defender_troops"] = json.loads(data["defender_troops_json"]) if data.get("defender_troops_json") else None
+        except Exception:
+            data["defender_troops"] = None
         data["left_seconds"] = max(0, data["end_time"] - now)
         data["ready"] = (now >= data["end_time"])
         return data
+
+async def set_battle_defense_troops(
+    battle_id: int,
+    defender_id: int,
+    selected_troops: Dict[str, Any]
+) -> tuple[bool, str]:
+    now = int(time.time())
+    async with get_db_connection() as db:
+        cursor = await db.execute("SELECT * FROM active_battles WHERE id = ?", (battle_id,))
+        b_row = await cursor.fetchone()
+        if not b_row:
+            return False, "Jang topilmadi!"
+        battle = dict(b_row)
+        if battle["status"] != "marching":
+            return False, "Jang allaqachon yakunlangan yoki bekor qilingan!"
+        if now >= battle["end_time"]:
+            return False, "Jang vaqti tugagan, mudofaa saflarini o'zgartirib bo'lmaydi!"
+
+        # Himoyachi xonadon egasi ekanligini tekshirish
+        cursor = await db.execute("SELECT * FROM houses WHERE id = ?", (battle["defender_house_id"],))
+        h_row = await cursor.fetchone()
+        if not h_row or h_row["owner_id"] != defender_id:
+            return False, "Siz bu qal'aning himoyachisi emassiz!"
+
+        # Qo'shinlarni tekshirish
+        cursor = await db.execute("SELECT * FROM armies WHERE user_id = ?", (defender_id,))
+        army_row = await cursor.fetchone()
+        army = dict(army_row) if army_row else {}
+
+        unit_cols = ["soldiers", "archers", "cavalry", "chakra", "gold_cloaks", "unsullied"]
+        cleaned = {}
+        for col in unit_cols:
+            qty = max(0, int(selected_troops.get(col, 0)))
+            if qty > army.get(col, 0):
+                return False, f"Sizda yetarli {col} yo'q! Mavjud: {army.get(col, 0)} ta."
+            cleaned[col] = qty
+
+        # Ajdarlarni tekshirish
+        dragon_ids = selected_troops.get("dragon_ids", [])
+        verified_dragons = []
+        if dragon_ids:
+            cursor = await db.execute(
+                "SELECT id FROM beasts WHERE user_id = ? AND beast_type = 'dragon' AND frozen_until <= ?",
+                (defender_id, now)
+            )
+            avail_d = {r["id"] for r in await cursor.fetchall()}
+            for did in dragon_ids:
+                if did in avail_d:
+                    verified_dragons.append(did)
+        cleaned["dragon_ids"] = verified_dragons
+
+        # O'rgamchaklarni tekshirish
+        spider_ids = selected_troops.get("spider_ids", [])
+        verified_spiders = []
+        if spider_ids:
+            cursor = await db.execute(
+                "SELECT id FROM beasts WHERE user_id = ? AND beast_type = 'spider' AND frozen_until <= ?",
+                (defender_id, now)
+            )
+            avail_s = {r["id"] for r in await cursor.fetchall()}
+            for sid in spider_ids:
+                if sid in avail_s:
+                    verified_spiders.append(sid)
+        cleaned["spider_ids"] = verified_spiders
+
+        cleaned["include_valyrian"] = bool(selected_troops.get("include_valyrian", True))
+
+        await db.execute(
+            "UPDATE active_battles SET defender_troops_json = ? WHERE id = ?",
+            (json.dumps(cleaned), battle_id)
+        )
+        await db.commit()
+    return True, "✅ Mudofaa rejasi muvaffaqiyatli saqlandi! Qo'shinlaringiz qal'a himoyasiga shay holatga keltirildi!"
 
 async def _refund_troops(db, attacker_id: int, troops: dict):
     await db.execute("""
@@ -901,6 +1008,10 @@ async def start_house_attack(
     call_id: Optional[int] = None
 ) -> tuple[bool, str, Optional[int]]:
     now = int(time.time())
+
+    # Sulh davri (Urush holati) tekshiruvi
+    if not await get_war_status():
+        return False, "🕊 Hozirda Valeriyada sulh davri e'lon qilingan! Admin tomonidan barcha urush va hujumlar vaqtincha to'xtatilgan.", None
 
     active = await get_user_active_battle(attacker_id)
     if active:
@@ -1194,9 +1305,63 @@ async def resolve_battle(battle_id: int) -> Dict[str, Any]:
             att_ally_power = max(10, int(att_ally_info["total_active_power"] * 0.25))
             att_power += att_ally_power
 
-        # Himoyachi kuchi
+        # Himoyachi kuchi va rejasini aniqlash
+        def_troops_raw = battle.get("defender_troops_json")
+        def_troops = None
+        if def_troops_raw:
+            try:
+                def_troops = json.loads(def_troops_raw)
+            except Exception:
+                def_troops = None
+
+        def_user_row = await get_user(defender_id)
+        def_valyrian_all = def_user_row.get("valyrian_steel", 0) if def_user_row else 0
         def_power_info = await calculate_player_power(defender_id)
-        def_power = def_power_info["total_active_power"]
+
+        if def_troops:
+            # Himoyachi faol mudofaa rejasini tuzgan!
+            include_def_valyrian = def_troops.get("include_valyrian", True)
+            effective_def_valyrian = def_valyrian_all if include_def_valyrian else 0
+            def_chakra_mult = 2 if effective_def_valyrian >= 1 else 1
+
+            def_power = (
+                def_troops.get("soldiers", 0) * UNITS["soldier"]["def"] +
+                def_troops.get("archers", 0) * UNITS.get("archer", {}).get("def", 5) +
+                def_troops.get("cavalry", 0) * UNITS.get("cavalry", {}).get("def", 4) +
+                def_troops.get("chakra", 0) * UNITS["chakra"]["def"] * def_chakra_mult +
+                def_troops.get("gold_cloaks", 0) * UNITS["gold_cloak"]["def"] +
+                def_troops.get("unsullied", 0) * UNITS["unsullied"]["def"] +
+                (effective_def_valyrian * 500)
+            )
+
+            # Qal'a darajasi bonusi
+            cursor = await db.execute("SELECT level FROM castles WHERE house_id = ?", (defender_house_id,))
+            c_row = await cursor.fetchone()
+            if c_row:
+                def_power += c_row["level"] * 200
+
+            def_dragon_ids = def_troops.get("dragon_ids", [])
+            for did in def_dragon_ids:
+                cursor = await db.execute("SELECT power FROM beasts WHERE id = ?", (did,))
+                dr = await cursor.fetchone()
+                if dr:
+                    def_power += dr["power"]
+
+            def_spider_ids = def_troops.get("spider_ids", [])
+            for sid in def_spider_ids:
+                cursor = await db.execute("SELECT power FROM beasts WHERE id = ?", (sid,))
+                sr = await cursor.fetchone()
+                if sr:
+                    def_power += sr["power"]
+        else:
+            # Standart avtomatik mudofaa: qal'a garnizoni va mavjud barcha kuchlar
+            def_power = def_power_info["total_active_power"]
+            def_dragon_ids = [d["id"] for d in def_power_info.get("active_dragons", [])]
+            cursor = await db.execute(
+                "SELECT id FROM beasts WHERE user_id = ? AND beast_type = 'spider' AND frozen_until <= ?",
+                (defender_id, now)
+            )
+            def_spider_ids = [s["id"] for s in await cursor.fetchall()]
 
         # Hujumchining maxsus taktik zarbalari (Soya qotili, Zahar, Yuzsiz)
         shadow_killed_dragon = None
@@ -1267,20 +1432,18 @@ async def resolve_battle(battle_id: int) -> Dict[str, Any]:
         if sent_dragon_ids:
             for did in sent_dragon_ids:
                 await db.execute("UPDATE beasts SET frozen_until = ? WHERE id = ?", (freeze_end, did))
-        for dragon in def_power_info["active_dragons"]:
-            await db.execute("UPDATE beasts SET frozen_until = ? WHERE id = ?", (freeze_end, dragon["id"]))
+        if def_dragon_ids:
+            for did in def_dragon_ids:
+                await db.execute("UPDATE beasts SET frozen_until = ? WHERE id = ?", (freeze_end, did))
 
         # O'rgamchaklarni muzlatish (28 soat)
         spider_freeze_end = now + SPIDER_FREEZE_SECONDS
         if sent_spider_ids:
             for sid in sent_spider_ids:
                 await db.execute("UPDATE beasts SET frozen_until = ? WHERE id = ?", (spider_freeze_end, sid))
-        cursor = await db.execute(
-            "SELECT id FROM beasts WHERE user_id = ? AND beast_type = 'spider' AND frozen_until <= ?",
-            (defender_id, now)
-        )
-        for s in await cursor.fetchall():
-            await db.execute("UPDATE beasts SET frozen_until = ? WHERE id = ?", (spider_freeze_end, s["id"]))
+        if def_spider_ids:
+            for sid in def_spider_ids:
+                await db.execute("UPDATE beasts SET frozen_until = ? WHERE id = ?", (spider_freeze_end, sid))
 
         # Talafotlar (faqat yuborilgan askarlardan yo'qotish hisoblanadi!)
         loss_rate_att = random.uniform(0.1, 0.25) if attacker_won else random.uniform(0.3, 0.55)
@@ -1341,20 +1504,66 @@ async def resolve_battle(battle_id: int) -> Dict[str, Any]:
         ))
 
         # Himoyachining yo'qotishlari
-        def_army = await get_user_army(defender_id)
-        loss_rate_def = random.uniform(0.2, 0.4) if attacker_won else random.uniform(0.1, 0.2)
-        def_loss_soldiers = max(1, int(def_army.get("soldiers", 0) * loss_rate_def))
-        def_loss_archers = int(def_army.get("archers", 0) * loss_rate_def)
-        def_loss_cavalry = int(def_army.get("cavalry", 0) * loss_rate_def)
+        loss_rate_def = random.uniform(0.15, 0.35) if attacker_won else random.uniform(0.05, 0.15)
+        def_losses = {}
+        total_def_lost = 0
 
-        await db.execute("""
-            UPDATE armies SET
-                soldiers = MAX(0, soldiers - ?),
-                archers = MAX(0, archers - ?),
-                cavalry = MAX(0, cavalry - ?)
-            WHERE user_id = ?
-        """, (def_loss_soldiers, def_loss_archers, def_loss_cavalry, defender_id))
-        total_def_lost = def_loss_soldiers + def_loss_archers + def_loss_cavalry
+        if def_troops:
+            # Faqat safarbar etilgan mudofaa qo'shinlaridan yo'qotish
+            unit_cols_def = ["soldiers", "archers", "cavalry", "chakra", "gold_cloaks", "unsullied"]
+            for col in unit_cols_def:
+                d_cnt = def_troops.get(col, 0)
+                if d_cnt > 0:
+                    lost = max(0, min(d_cnt, int(d_cnt * loss_rate_def)))
+                    if lost == 0 and attacker_won and d_cnt >= 1:
+                        lost = 1
+                    def_losses[col] = lost
+                    total_def_lost += lost
+                else:
+                    def_losses[col] = 0
+
+            await db.execute("""
+                UPDATE armies SET
+                    soldiers = MAX(0, soldiers - ?),
+                    archers = MAX(0, archers - ?),
+                    cavalry = MAX(0, cavalry - ?),
+                    chakra = MAX(0, chakra - ?),
+                    gold_cloaks = MAX(0, gold_cloaks - ?),
+                    unsullied = MAX(0, unsullied - ?)
+                WHERE user_id = ?
+            """, (
+                def_losses["soldiers"],
+                def_losses["archers"],
+                def_losses["cavalry"],
+                def_losses["chakra"],
+                def_losses["gold_cloaks"],
+                def_losses["unsullied"],
+                defender_id
+            ))
+        else:
+            # Standart garnizon yo'qotishi
+            def_army = await get_user_army(defender_id)
+            loss_rate_def_std = random.uniform(0.2, 0.4) if attacker_won else random.uniform(0.1, 0.2)
+            def_loss_soldiers = max(1, int(def_army.get("soldiers", 0) * loss_rate_def_std))
+            def_loss_archers = int(def_army.get("archers", 0) * loss_rate_def_std)
+            def_loss_cavalry = int(def_army.get("cavalry", 0) * loss_rate_def_std)
+
+            await db.execute("""
+                UPDATE armies SET
+                    soldiers = MAX(0, soldiers - ?),
+                    archers = MAX(0, archers - ?),
+                    cavalry = MAX(0, cavalry - ?)
+                WHERE user_id = ?
+            """, (def_loss_soldiers, def_loss_archers, def_loss_cavalry, defender_id))
+            total_def_lost = def_loss_soldiers + def_loss_archers + def_loss_cavalry
+            def_losses = {
+                "soldiers": def_loss_soldiers,
+                "archers": def_loss_archers,
+                "cavalry": def_loss_cavalry,
+                "chakra": 0,
+                "gold_cloaks": 0,
+                "unsullied": 0
+            }
 
         # O'lja va Vassal qilish
         loot_gold = 0
@@ -1423,6 +1632,8 @@ async def resolve_battle(battle_id: int) -> Dict[str, Any]:
             "defender_house": defender_house["name"],
             "attacker_power": att_roll,
             "defender_power": def_roll,
+            "attacker_troops_sent": troops,
+            "defender_troops_sent": def_troops,
             "bannermen_power": bannermen_power,
             "bannermen_count": bannermen_count,
             "ally_support_power": ally_support_power,
@@ -1436,6 +1647,7 @@ async def resolve_battle(battle_id: int) -> Dict[str, Any]:
             "attacker_losses_detail": att_losses,
             "attacker_survivors": att_survivors,
             "defender_loss": total_def_lost,
+            "defender_losses_detail": def_losses,
             "loot_gold": loot_gold,
             "vassalized": vassalized,
             "is_king_ascension": is_king_ascension,
@@ -2861,6 +3073,108 @@ async def get_house_spy_status(user_id: int, house_id: int) -> Optional[Dict[str
             if now - spy["reveal_at"] < 24 * 3600:
                 return {"status": "completed", "spy_id": spy["id"]}
     return None
+
+# --- Urush holati funksiyalari (Admin War Status) ---
+async def get_war_status() -> bool:
+    """Urush ochiq (True) yoki yopiq/sulh davri (False) ekanligini qaytaradi."""
+    async with get_db_connection() as db:
+        cursor = await db.execute("SELECT value FROM global_settings WHERE key = 'war_status'")
+        row = await cursor.fetchone()
+        if not row:
+            return True
+        return row["value"] == "open"
+
+async def set_war_status(is_open: bool) -> bool:
+    val = "open" if is_open else "closed"
+    async with get_db_connection() as db:
+        await db.execute(
+            "INSERT INTO global_settings (key, value) VALUES ('war_status', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (val,)
+        )
+        await db.commit()
+    return is_open
+
+async def toggle_war_status() -> bool:
+    current = await get_war_status()
+    new_status = not current
+    await set_war_status(new_status)
+    return new_status
+
+# --- Admin boshqaruvi funksiyalari (Bot Admins) ---
+def is_super_admin(user_id: int) -> bool:
+    return user_id in ADMIN_IDS
+
+async def is_bot_admin(user_id: int) -> bool:
+    if user_id in ADMIN_IDS:
+        return True
+    async with get_db_connection() as db:
+        cursor = await db.execute("SELECT telegram_id FROM bot_admins WHERE telegram_id = ?", (user_id,))
+        row = await cursor.fetchone()
+        return row is not None
+
+async def get_all_bot_admins() -> List[Dict[str, Any]]:
+    admins = []
+    # 1. Super admins
+    for sa_id in ADMIN_IDS:
+        u = await get_user(sa_id)
+        admins.append({
+            "telegram_id": sa_id,
+            "username": u.get("username") if u else None,
+            "full_name": u.get("full_name") if u else f"Super Admin #{sa_id}",
+            "role": "super_admin",
+            "added_by": 0,
+            "added_at": 0
+        })
+    # 2. Database admins
+    async with get_db_connection() as db:
+        cursor = await db.execute("""
+            SELECT ba.telegram_id, ba.added_by, ba.added_at, ba.role,
+                   u.username, u.full_name
+            FROM bot_admins ba
+            LEFT JOIN users u ON u.telegram_id = ba.telegram_id
+            ORDER BY ba.added_at DESC
+        """)
+        for row in await cursor.fetchall():
+            admins.append({
+                "telegram_id": row["telegram_id"],
+                "username": row["username"],
+                "full_name": row["full_name"] or f"Admin #{row['telegram_id']}",
+                "role": row["role"] or "admin",
+                "added_by": row["added_by"],
+                "added_at": row["added_at"]
+            })
+    return admins
+
+async def add_bot_admin(user_id: int, added_by: int) -> tuple[bool, str]:
+    if user_id in ADMIN_IDS:
+        return False, "Bu foydalanuvchi allaqachon Bosh Admin (Super Admin)!"
+    user = await get_user(user_id)
+    if not user:
+        return False, "Bunday foydalanuvchi botda topilmadi! Foydalanuvchi avval botga /start bosgan bo'lishi kerak."
+    async with get_db_connection() as db:
+        cursor = await db.execute("SELECT telegram_id FROM bot_admins WHERE telegram_id = ?", (user_id,))
+        if await cursor.fetchone():
+            return False, "Bu foydalanuvchi allaqachon bot admini qilib tayinlangan!"
+        now = int(time.time())
+        await db.execute(
+            "INSERT INTO bot_admins (telegram_id, added_by, added_at, role) VALUES (?, ?, ?, 'admin')",
+            (user_id, added_by, now)
+        )
+        await db.commit()
+    name = user.get("custom_name") or user.get("full_name") or str(user_id)
+    return True, f"✅ **{name}** (ID: `{user_id}`) muvaffaqiyatli bot admini etib tayinlandi!"
+
+async def remove_bot_admin(user_id: int) -> tuple[bool, str]:
+    if user_id in ADMIN_IDS:
+        return False, "Bosh Adminni (Super Admin) ro'yxatdan o'chirib bo'lmaydi!"
+    async with get_db_connection() as db:
+        cursor = await db.execute("SELECT telegram_id FROM bot_admins WHERE telegram_id = ?", (user_id,))
+        if not await cursor.fetchone():
+            return False, "Bu foydalanuvchi adminlar ro'yxatida yo'q!"
+        await db.execute("DELETE FROM bot_admins WHERE telegram_id = ?", (user_id,))
+        await db.commit()
+    return True, f"✅ Foydalanuvchi (`{user_id}`) adminlik huquqidan mahrum qilindi."
+
 
 
 

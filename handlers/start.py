@@ -1,6 +1,6 @@
 from aiogram import Router, types
 from aiogram.filters import CommandStart, Command
-from database import get_or_create_user, get_user_house, is_user_blocked
+from database import get_or_create_user, get_user_house, is_user_blocked, is_bot_admin
 from keyboards import main_menu_keyboard
 
 router = Router()
@@ -30,9 +30,10 @@ async def cmd_start(message: types.Message):
         f"O'yinni boshlash uchun quyidagi tugmalardan birini tanlang:"
     )
 
+    is_adm = await is_bot_admin(message.from_user.id)
     await message.answer(
         welcome_text,
-        reply_markup=main_menu_keyboard(message.from_user.id),
+        reply_markup=main_menu_keyboard(message.from_user.id, is_admin=is_adm),
         parse_mode="Markdown"
     )
 
